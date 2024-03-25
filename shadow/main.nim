@@ -48,6 +48,54 @@ proc main {.async.} =
     rng = libp2p.newRng()
     #randCountry = rng.rand(distribCumSummed[^1])
     #country = distribCumSummed.find(distribCumSummed.filterIt(it >= randCountry)[0])
+
+  var messagesChunks = initTable[int, CountTable[(int, int)]]()
+  var messagesChunkCount = initCountTable[int]()
+
+  ##
+  # ReqResp Protocol
+  ##
+  const ReqCodec = "/nim-libp2p/req/1.0.0"
+  type
+    ReqProto = ref object of LPProtocol
+      rx: Table[(int, int, int), seq[Future[void]]]
+      #tx: Table[int, Future[void]
+
+  proc new(T: typedesc[ReqProto]): T =
+    let reqproto = T(rx: initTable[(int, int, int), seq[Future[void]]]())
+
+    # create handler for incoming connection
+    proc handle(stream: Connection, proto: string) {.async.} =
+        let
+          req = await stream.readLp(4)
+          msgId = req[0].int
+          row = req[1].int
+          col = req[2].int
+          tout = req[3]
+          reqDbg = (msgId, stream.peerId, row, col, tout)
+        echo "request arrived:", reqDbg
+        if messagesChunks.hasKey(msgId) and messagesChunks[msgId][(row,col)] >= 1:
+          echo "already heaving", reqDbg
+        else:
+          echo "waiting for", reqDbg
+          let f = newFuture[void]()
+          reqproto.rx.mgetOrPut((msgId, row, col), newSeq[Future[void]]()).add(f)
+          if await f.withTimeout(tout.seconds):
+            reqproto.rx[(msgId, row, col)].delete(reqproto.rx[(msgId, row, col)].find(f))
+          else:
+            echo "tout expired for", reqDbg
+            await stream.close()
+            return
+
+        echo "responding for", reqDbg
+        await stream.writeLp([1.byte]) # TODO: send segment      
+        await stream.close()
+
+    # assign the new handler
+    reqproto.handler = handle
+    reqproto.codec = ReqCodec
+    return reqproto
+
   let
     address = initTAddress("0.0.0.0:5000")
     switch =
@@ -70,6 +118,8 @@ proc main {.async.} =
       anonymize = true,
       )
     pingProtocol = Ping.new(rng=rng)
+    reqProto = ReqProto.new()
+
   gossipSub.parameters.floodPublish = false
   #gossipSub.parameters.lazyPushThreshold = 1_000_000_000
   #gossipSub.parameters.lazyPushThreshold = 0
@@ -117,8 +167,6 @@ proc main {.async.} =
       sentDate = initTime(sentMoment.seconds, sentNanosecs)
     result = getTime() - sentDate
 
-  var messagesChunks = initTable[int, CountTable[(int, int)]]()
-  var messagesChunkCount = initCountTable[int]()
   proc messageHandler(topic: string, data: seq[byte]) {.async.} =
     let
       sentUint = uint64.fromBytesLE(data)
@@ -163,6 +211,12 @@ proc main {.async.} =
       echo "arrived: ", messagesChunkCount[msgId], " of ", interest
       echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " row: ", row, " column: ", col
 
+    # answer request if needed
+    if reqProto.rx.haskey((msgId, row, col)):
+      echo "Answering requests for ", msgId, row, col
+      for f in reqProto.rx[(msgId, row, col)]:
+        f.complete()
+
     proc hasInRow(row:int) : int =
       for i in 0 ..< numCols :
         if messagesChunks[msgId][(row, i)] >= 1:
@@ -185,6 +239,10 @@ proc main {.async.} =
                   sendOnCol(col, data)
               if repairForward:
                 sendOnRow(row, data)
+              if reqProto.rx.haskey((msgId, row, i)):
+                echo "Answering requests for ", msgId, row, i
+                for f in reqProto.rx[(msgId, row, i)]:
+                  f.complete()
 
       if int(col) in cols:
         if hasInCol(col) >= numRowsK:
@@ -197,6 +255,10 @@ proc main {.async.} =
                   sendOnRow(row, data)
               if repairForward:
                 sendOnCol(col, data)
+              if reqProto.rx.haskey((msgId, i, col)):
+                echo "Answering requests for ", msgId, i, col
+                for f in reqProto.rx[(msgId, i, col)]:
+                  f.complete()
 
     if messagesChunkCount[msgId] < interest: return
 
@@ -222,6 +284,7 @@ proc main {.async.} =
 
   switch.mount(gossipSub)
   switch.mount(pingProtocol)
+  switch.mount(reqProto)
   await switch.start()
   #TODO
   #defer: await switch.stop()
@@ -310,6 +373,37 @@ proc main {.async.} =
           if sendCols:
             nowBytes[16] = 1
             discard gossipSub.publish(dasTopicC(col), nowBytes, publisherMaxCopies, publisherShufflePeers)
+    else:
+      #sample
+      let
+        sampleCount = 1
+
+      proc sample(row, col: int) {.async.} =
+        # select peer
+        let peerId = random.sample(switch.connectedPeers(Direction.Out))
+        try:
+          let
+            #peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
+            conn = await switch.dial(peerId, ReqCodec)
+            req = [msg.byte, row.byte, col.byte, 3.byte]
+          echo "requesting:", (msg, peerId, row, col)
+          await conn.writeLp(req)
+          echo "requested:", (peerId, row, col)
+          let resp = await conn.readLp(1) #TODO: add timeout here
+
+        except CatchableError as exc:
+          echo "Failed to dial", exc.msg
+
+      var
+        sampleR = toSeq(0..<numRows)
+        sampleC = toSeq(0..<numCols)
+      random.shuffle(sampleR)
+      random.shuffle(sampleC)
+
+      assert(numRows >= sampleCount)
+      assert(numCols >= sampleCount)
+      for i in 0..<sampleCount:
+        await sample(sampleR[i], sampleC[i])
 
   #echo "BW: ", libp2p_protocols_bytes.value(labelValues=["/meshsub/1.1.0", "in"]) + libp2p_protocols_bytes.value(labelValues=["/meshsub/1.1.0", "out"])
   #echo "DUPS: ", libp2p_gossipsub_duplicate.value(), " / ", libp2p_gossipsub_received.value()
