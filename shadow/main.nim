@@ -204,12 +204,11 @@ proc main {.async.} =
 
     messagesChunks[msgId].inc((row,col))
     if messagesChunks[msgId][(row,col)] > 1:
-      echo sentUint, " DUP ms: ", messageLatency(data).inMilliseconds(), " row: ", row, " column: ", col
+      echo sentUint, " DUP ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col
       return
     else:
       messagesChunkCount.inc(msgId)
-      echo "arrived: ", messagesChunkCount[msgId], " of ", interest
-      echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " row: ", row, " column: ", col
+      echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col, " ", messagesChunkCount[msgId], "/", interest
 
     # answer request if needed
     if reqProto.rx.haskey((msgId, row, col)):
