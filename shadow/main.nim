@@ -310,16 +310,18 @@ proc main {.async.} =
     except:
       echo "Failed to ping"
 
+  proc shadowPeerId2peerAddr(i: int): MultiAddress =
+    ## convert Shadow node ID to address
+    let tAddress = "peer" & $i & ":5000"
+    resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())[0]
 
   let connectTo = parseInt(getEnv("CONNECTTO"))
   var connected = 0
   for peerInfo in peersInfo:
     if connected >= connectTo: break
-    let tAddress = "peer" & $peerInfo & ":5000"
-    echo tAddress
-    let addrs = resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())
+    let peerAddr = shadowPeerId2peerAddr(peerInfo)
     try:
-      let peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
+      let peerId = await switch.connect(peerAddr, allowUnknownPeerId=true).wait(5.seconds)
       #asyncSpawn pinger(peerId)
       connected.inc()
     except CatchableError as exc:
