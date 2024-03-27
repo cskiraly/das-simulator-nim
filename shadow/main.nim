@@ -140,16 +140,20 @@ proc main {.async.} =
     firstMessageDeliveriesDecay: 0.9
   )
 
-  var rows = toSeq(0..<numRows)
-  if not isPublisher:
-    rng.shuffle(rows)
-    rows = rows[0..<custodyRows]
+  proc peerToRows(peerId: int) : seq[int] =
+    result = toSeq(0..<numRows)
+    if not isPublisher:
+      rng.shuffle(result)
+      result = result[0..<custodyRows]
 
-  var cols = toSeq(0..<numCols)
-  if not isPublisher:
-    rng.shuffle(cols)
-    cols = cols[0..<custodyCols]
+  proc peerToCols(peerId: int) : seq[int] =
+    result = toSeq(0..<numRows)
+    if not isPublisher:
+      rng.shuffle(result)
+      result = result[0..<custodyRows]
 
+  var rows = peerToRows(myId)
+  var cols = peerToCols(myId)
 
   proc dasTopicR(row: int) : string =
     "R" & $row
