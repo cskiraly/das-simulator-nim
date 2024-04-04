@@ -10,6 +10,21 @@ from nativesockets import getHostname
 proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
 
+proc shadowPeerId2peerAddr(i: int): MultiAddress =
+  ## convert Shadow node ID to address
+  let tAddress = "peer" & $i & ":5000"
+  resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())[0]
+
+proc peerAddr2rng(peerAddr: MultiAddress, usecase: auto): Rand =
+  ## get an RNG for a given peer
+  let seed =  hash((peerAddr, usecase))
+  initRand(seed)
+
+proc peerId2rng(peerId: PeerId, usecase: auto): Rand =
+  ## get an RNG for a given peer
+  let seed =  hash((peerId, usecase))
+  initRand(seed)
+
 proc main {.async.} =
   # make sure random is random
   randomize()
@@ -140,20 +155,22 @@ proc main {.async.} =
     firstMessageDeliveriesDecay: 0.9
   )
 
-  proc peerToRows(peerId: int) : seq[int] =
+  proc peerToRows(peerId: PeerId) : seq[int] =
     result = toSeq(0..<numRows)
     if not isPublisher:
+      var rng = peerId2rng(peerId, "rows")
       rng.shuffle(result)
       result = result[0..<custodyRows]
 
-  proc peerToCols(peerId: int) : seq[int] =
-    result = toSeq(0..<numRows)
+  proc peerToCols(peerId: PeerId) : seq[int] =
+    result = toSeq(0..<numCols)
     if not isPublisher:
+      var rng = peerId2rng(peerId, "cols")
       rng.shuffle(result)
-      result = result[0..<custodyRows]
+      result = result[0..<custodyCols]
 
-  var rows = peerToRows(myId)
-  var cols = peerToCols(myId)
+  var rows = peerToRows(switch.peerInfo.peerId)
+  var cols = peerToCols(switch.peerInfo.peerId)
 
   proc dasTopicR(row: int) : string =
     "R" & $row
@@ -309,11 +326,6 @@ proc main {.async.} =
         await sleepAsync(delay)
     except:
       echo "Failed to ping"
-
-  proc shadowPeerId2peerAddr(i: int): MultiAddress =
-    ## convert Shadow node ID to address
-    let tAddress = "peer" & $i & ":5000"
-    resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())[0]
 
   let connectTo = parseInt(getEnv("CONNECTTO"))
   var connected = 0
