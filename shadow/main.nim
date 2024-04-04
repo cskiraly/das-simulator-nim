@@ -216,7 +216,7 @@ proc main {.async.} =
 
     # answer request if needed
     if reqProto.rx.haskey((msgId, row, col)):
-      echo "Answering requests for ", msgId, row, col
+      echo "Answering requests for ", msgId, " r", row, "c", col
       for f in reqProto.rx[(msgId, row, col)]:
         f.complete()
 
