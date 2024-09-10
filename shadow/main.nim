@@ -395,21 +395,54 @@ proc main {.async.} =
       let
         sampleCount = 1
 
+      let
+        #peers = switch.connectedPeers(Direction.Out) # we might need a bigger set
+        peers = switch.peerStore[AddressBook].book
+      echo "Peers:", peers
+      var
+        colPeers: array[numCols, HashSet[PeerId]]  #peers interested in a given column
+        rowPeers: array[numRows, HashSet[PeerId]]
+
+      for peerId in peers.keys:
+        let
+          cols = peerToCols(peerId)
+          rows = peerToRows(peerId)
+        for col in cols:
+          colPeers[col].incl(peerId)
+        for row in rows:
+          rowPeers[row].incl(peerId)
+      echo "colPeers:", colPeers
+      echo "rowPeers:", rowPeers
+
       proc sample(row, col: int) {.async.} =
         # select peer
-        let peerId = random.sample(switch.connectedPeers(Direction.Out))
-        try:
-          let
-            #peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
-            conn = await switch.dial(peerId, ReqCodec)
-            req = [msg.byte, row.byte, col.byte, 3.byte]
-          echo "requesting:", (msg, peerId, row, col)
-          await conn.writeLp(req)
-          echo "requested:", (peerId, row, col)
-          let resp = await conn.readLp(1) #TODO: add timeout here
+        var candidates = toSeq(rowPeers[row] + colPeers[col])
+        random.shuffle(candidates)
+        if candidates.len == 0:
+          echo "Warning, not enoough peers for ", "r", row, "c", col
+          #TODO: look for new peers
+          return
+        for i, peerId in candidates.pairs:
+          try:
+            let
+              tout = 3
+              req = [msg.byte, row.byte, col.byte, tout.byte]
+              #peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
+              conn = await switch.dial(peerId, ReqCodec)
+            try:
+              echo "requesting:", (i, peerId, msg, row, col)
+              await conn.writeLp(req)
+              let resp = await conn.readLp(1) #TODO: add timeout here
+              echo "Received sample ", (peerId, msg, row, col)
+              return
+            except CatchableError as exc:
+              echo "ReqResp error ", exc.msg
+          except CatchableError as exc:
+            echo "Failed to dial: ", exc.msg
 
-        except CatchableError as exc:
-          echo "Failed to dial", exc.msg
+        #no one responded
+        raise newException(CatchableError, "Segment can't be retrieved")
+
 
       var
         sampleR = toSeq(0..<numRows)
