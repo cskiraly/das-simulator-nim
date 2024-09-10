@@ -31,18 +31,18 @@ proc main {.async.} =
 
   const
     blocksize = 2^21  # size of DAS block, before EC, in bytes
-    numRows = 64      # number of Rows after EC
-    numRowsK = 32     # number of Rows before EC
+    numRows = 128      # number of Rows after EC
+    numRowsK = 64     # number of Rows before EC
     numCols = 128
     numColsK = 64
-    custodyRows = 1   # rows to custody (=topics to sbscribe)
-    custodyCols = 1
+    custodyRows = 4   # rows to custody (=topics to sbscribe)
+    custodyCols = 4
     sendRows = true   # whether the publisher send out on row topics
     sendCols = true
-    crossForward = false   # whether to relay received segments in the other dimension (row->col, col->row)
+    crossForward = true   # whether to relay received segments in the other dimension (row->col, col->row)
     publisherMaxCopies = 1  # how many copies of each segment to send out (see shufflepeers as well)
     publisherShufflePeers = true # how to select peers to send to. false: always the same; true: randomize
-    publisherSendInRandomOrder = false  # whether to radomize segment order when publishing
+    publisherSendInRandomOrder = true  # whether to radomize segment order when publishing
     publisherSendRowCount = numRows # numRows: send whole row; numRowsK: send only half row
     publisherSendColCount = numCols
     repairOnTheFly = true # whether to repar as soon as a whole K arrived (both row and column)

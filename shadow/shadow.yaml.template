@@ -5,7 +5,7 @@ general:
   progress: true
 
 experimental:
-  use_memory_manager: false
+  use_memory_manager: true
 
 x-constants:
   - &FastHost
@@ -15,7 +15,7 @@ x-constants:
     processes:
     - path: ./main
       start_time: 5s
-      environment: {"PEERS": "60", "CONNECTTO": "50"}
+      environment: {"PEERS": "100", "CONNECTTO": "200"}
   - &SlowHost
     network_node_id: 0
     bandwidth_up: "20 Mbit"
@@ -23,7 +23,7 @@ x-constants:
     processes:
     - path: ./main
       start_time: 5s
-      environment: {"PEERS": "60", "CONNECTTO": "50"}
+      environment: {"PEERS": "100", "CONNECTTO": "200"}
 
 
 network:
