@@ -5,7 +5,7 @@ BEGIN {
 	FS = " ";		#default column separator
 	network_size = 0
 	max_nw_lat = sum_nw_lat = 0
-	hop_lat = 100	#should be consistent with shadow.yaml
+	hop_lat = 1000	#should be consistent with shadow.yaml
 }
 
 {
@@ -27,7 +27,7 @@ END {
 
 	print "Total Nodes : ", network_size, "Total Messages Published : ", length(msg_arr), 
             "Network Latency\t MAX : ", max_nw_lat, "\tAverage : ", sum_nw_lat/NR
-	print "   Message ID \t       Avg Latency \t Messages Received"
+	print "ID\t Avg Latency \t Messages Received"
 	for (value in msg_arr) {
 		sum_rx_msgs = 0;
         latency = 0;
@@ -36,12 +36,14 @@ END {
 			if (parts[1] == value) {
 				sum_rx_msgs = sum_rx_msgs + lat_arr[key]; 					#total receives / message
 				latency = latency + (lat_arr[key] * parts[2]) 
-				spread[ int((parts[2]) / hop_lat) ] = lat_arr[key]           #hop-by-hop spread count of messages
+				spread[ int((parts[2]) / hop_lat) ] += lat_arr[key]           #hop-by-hop spread count of messages
+				#print int((parts[2]) / hop_lat), lat_arr[key]
 	    	}
 	    }
 
-		print value, "\t", latency/sum_rx_msgs, "\t  ", sum_rx_msgs, "spread is", 
-                spread[1], spread[2], spread[3], spread[4], spread[5], spread[6], spread[7]   
+		print value, "\t", latency/sum_rx_msgs, "\t  ", sum_rx_msgs, "with spread:", 
+                spread[0], spread[1], spread[2], spread[3], spread[4], spread[5], spread[6], spread[7],   
+                spread[8], spread[9], spread[10], spread[11], spread[12], spread[13], spread[14], spread[15]   
         delete spread
     }
 }
