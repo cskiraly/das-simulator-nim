@@ -44,5 +44,5 @@ for i in $(seq $runs); do
     echo "Summary for turn "$i
     awk -f summary_latency.awk latencies$i
     awk -f summary_shadowlog.awk shadowlog$i
-    awk -f summary_dontwant.awk stats$i    
+    #awk -f summary_dontwant.awk stats$i    
 done
