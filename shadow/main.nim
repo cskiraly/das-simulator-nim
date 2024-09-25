@@ -221,20 +221,20 @@ proc main {.async.} =
     if crossForward:
       if roc:
         if int(col) in cols:
-          echo "crossing to col: ", col
+          #echo "crossing to col: ", col
           sendOnCol(col, data)
       else:
         if int(row) in rows:
-          echo "crossing to row: ", row
+          #echo "crossing to row: ", row
           sendOnRow(row, data)
 
     messagesChunks[msgId].inc((row,col))
     if messagesChunks[msgId][(row,col)] > 1:
-      echo sentUint, " DUP ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col
+      #echo sentUint, " DUP ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col
       return
     else:
       messagesChunkCount.inc(msgId)
-      echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col, " ", messagesChunkCount[msgId], "/", interest
+      #echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col, " ", messagesChunkCount[msgId], "/", interest
 
     # answer request if needed
     if reqProto.rx.haskey((msgId, row, col)):
@@ -255,6 +255,7 @@ proc main {.async.} =
     if repairOnTheFly:
       if int(row) in rows:
         if hasInRow(row) >= numColsK:
+          echo "Repairing r", row
           for i in 0 ..< numCols :
             if messagesChunks[msgId][(row, i)] == 0:
               messagesChunks[msgId][(row, i)] = 1
@@ -271,6 +272,7 @@ proc main {.async.} =
 
       if int(col) in cols:
         if hasInCol(col) >= numRowsK:
+          echo "Repairing c", col
           for i in 0 ..< numRows :
             if messagesChunks[msgId][(i, col)] == 0:
               messagesChunks[msgId][(i, col)] = 1
@@ -287,8 +289,8 @@ proc main {.async.} =
 
     if messagesChunkCount[msgId] < interest: return
 
-    echo sentUint, " BLK ms: ", messageLatency(data).inMilliseconds(), " block arrived"
-    echo sentUint, " milliseconds: ", messageLatency(data).inMilliseconds()
+    echo msgId, " BLK ms: ", messageLatency(data).inMilliseconds(), " block arrived"
+    echo msgId, " milliseconds: ", messageLatency(data).inMilliseconds()
 
   var
     startOfTest: Moment
@@ -417,8 +419,8 @@ proc main {.async.} =
           colPeers[col].incl(peerId)
         for row in rows:
           rowPeers[row].incl(peerId)
-      echo "colPeers:", colPeers
-      echo "rowPeers:", rowPeers
+      #echo "colPeers:", colPeers
+      #echo "rowPeers:", rowPeers
 
       proc sampleOne(msg, row, col: int): Future[bool] {.async.} =
         # select peer
