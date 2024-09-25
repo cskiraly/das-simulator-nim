@@ -332,23 +332,26 @@ proc main {.async.} =
       echo "Failed to ping"
 
   let connectTo = parseInt(getEnv("CONNECTTO"))
-  var connected = 0
-  for peerInfo in peersInfo:
-    if connected >= connectTo: break
-    let peerAddr = shadowPeerId2peerAddr(peerInfo)
-    try:
-      let peerId = await switch.connect(peerAddr, allowUnknownPeerId=true).wait(5.seconds)
-      #asyncSpawn pinger(peerId)
-      connected.inc()
-    except CatchableError as exc:
-      echo "Failed to dial", exc.msg
+  proc connectToPeers(c: int) {.async.} =
+    var connected = 0
+    for peerInfo in peersInfo:
+      if connected >= connectTo: break
+      let peerAddr = shadowPeerId2peerAddr(peerInfo)
+      try:
+        let peerId = await switch.connect(peerAddr, allowUnknownPeerId=true).wait(5.seconds)
+        #asyncSpawn pinger(peerId)
+        connected.inc()
+      except CatchableError as exc:
+        echo "Failed to dial", exc.msg
+
+  discard connectToPeers(connectTo)
 
   #let
   #  maxMessageDelay = client.param(int, "max_message_delay")
   #  warmupMessages = client.param(int, "warmup_messages")
   #startOfTest = Moment.now() + milliseconds(warmupMessages * maxMessageDelay div 2)
 
-  await sleepAsync(10.seconds)
+  await sleepAsync(180.seconds)
   # echo "Mesh size: ", gossipSub.mesh.getOrDefault("test").len
   for row in rows:
     let topic = dasTopicR(row)
