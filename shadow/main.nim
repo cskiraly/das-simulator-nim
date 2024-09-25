@@ -7,8 +7,7 @@ import sequtils, hashes, math, metrics
 from times import getTime, toUnix, fromUnix, `-`, initTime, `$`, inMilliseconds, Duration
 from nativesockets import getHostname
 
-proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
-  return ok(($m.data.hash).toBytes())
+import gsnetwork
 
 proc shadowPeerId2peerAddr(i: int): MultiAddress =
   ## convert Shadow node ID to address
@@ -74,18 +73,10 @@ proc main {.async.} =
 
   ##
   # ReqResp Protocol
-  ##
-  const ReqCodec = "/nim-libp2p/req/1.0.0"
-  type
-    ReqProto = ref object of LPProtocol
-      rx: Table[(int, int, int), seq[Future[void]]]
-      #tx: Table[int, Future[void]
-
-  proc new(T: typedesc[ReqProto]): T =
-    let reqproto = T(rx: initTable[(int, int, int), seq[Future[void]]]())
-
-    # create handler for incoming connection
-    proc handle(stream: Connection, proto: string) {.async.} =
+  ##    
+  var rx: Table[(int, int, int), seq[Future[void]]] = initTable[(int, int, int), seq[Future[void]]]()
+  # create handler for incoming connection
+  proc reqHandler(stream: Connection, proto: string) {.async.} =
         let
           req = await stream.readLp(6)
           msgId = req[0].int
@@ -99,9 +90,9 @@ proc main {.async.} =
         else:
           echo "waiting for", reqDbg
           let f = newFuture[void]()
-          reqproto.rx.mgetOrPut((msgId, row, col), newSeq[Future[void]]()).add(f)
+          rx.mgetOrPut((msgId, row, col), newSeq[Future[void]]()).add(f)
           if await f.withTimeout(tout.seconds):
-            reqproto.rx[(msgId, row, col)].delete(reqproto.rx[(msgId, row, col)].find(f))
+            rx[(msgId, row, col)].delete(rx[(msgId, row, col)].find(f))
           else:
             echo "tout expired for", reqDbg
             await stream.close()
@@ -111,54 +102,7 @@ proc main {.async.} =
         await stream.writeLp([1.byte]) # TODO: send segment      
         await stream.close()
 
-    # assign the new handler
-    reqproto.handler = handle
-    reqproto.codec = ReqCodec
-    return reqproto
-
-  let
-    address = initTAddress("0.0.0.0:5000")
-    switch =
-      SwitchBuilder
-        .new()
-        .withAddress(MultiAddress.init(address).tryGet())
-        .withRng(rng)
-        #.withYamux()
-        .withMplex()
-        .withMaxConnections(10000)
-        .withTcpTransport(flags = {ServerFlags.TcpNoDelay})
-        #.withPlainText()
-        .withNoise()
-        .build()
-    gossipSub = GossipSub.init(
-      switch = switch,
-#      triggerSelf = true,
-      msgIdProvider = msgIdProvider,
-      verifySignature = false,
-      anonymize = true,
-      )
-    pingProtocol = Ping.new(rng=rng)
-    reqProto = ReqProto.new()
-
-  gossipSub.parameters.floodPublish = false
-  #gossipSub.parameters.lazyPushThreshold = 1_000_000_000
-  #gossipSub.parameters.lazyPushThreshold = 0
-  gossipSub.parameters.opportunisticGraftThreshold = -10000
-  gossipSub.parameters.heartbeatInterval = 700.milliseconds
-  gossipSub.parameters.pruneBackoff = 3.seconds
-  gossipSub.parameters.gossipFactor = 0.05
-  gossipSub.parameters.d = 8
-  gossipSub.parameters.dLow = 6
-  gossipSub.parameters.dHigh = 12
-  gossipSub.parameters.dScore = 6
-  gossipSub.parameters.dOut = 6 div 2
-  gossipSub.parameters.dLazy = 6
-  gossipSub.topicParams["test"] = TopicParams(
-    topicWeight: 1,
-    firstMessageDeliveriesWeight: 1,
-    firstMessageDeliveriesCap: 30,
-    firstMessageDeliveriesDecay: 0.9
-  )
+  let netw = await gsnetwork.init(reqHandler)
 
   proc peerToRows(peerId: PeerId) : seq[int] =
     result = toSeq(0..<numRows)
@@ -174,8 +118,8 @@ proc main {.async.} =
       rng.shuffle(result)
       result = result[0..<custodyCols]
 
-  var rows = peerToRows(switch.peerInfo.peerId)
-  var cols = peerToCols(switch.peerInfo.peerId)
+  var rows = peerToRows(netw.getPeerId())
+  var cols = peerToCols(netw.getPeerId())
 
   proc dasTopicR(row: int) : string =
     "R" & $row
@@ -211,12 +155,12 @@ proc main {.async.} =
     proc sendOnCol(col: int, data: seq[byte]) =
           var rocData = data
           rocData[16] = 1
-          discard gossipSub.publish(dasTopicC(int(col)), rocData)
+          discard netw.publish(dasTopicC(int(col)), rocData)
 
     proc sendOnRow(row: int, data: seq[byte]) =
           var rocData = data
           rocData[16] = 0
-          discard gossipSub.publish(dasTopicR(int(row)), rocData)
+          discard netw.publish(dasTopicR(int(row)), rocData)
 
     if crossForward:
       if roc:
@@ -237,9 +181,9 @@ proc main {.async.} =
       #echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col, " ", messagesChunkCount[msgId], "/", interest
 
     # answer request if needed
-    if reqProto.rx.haskey((msgId, row, col)):
+    if rx.haskey((msgId, row, col)):
       echo "Answering requests for ", msgId, " r", row, "c", col
-      for f in reqProto.rx[(msgId, row, col)]:
+      for f in rx[(msgId, row, col)]:
         f.complete()
 
     proc hasInRow(row:int) : int =
@@ -265,9 +209,9 @@ proc main {.async.} =
                   sendOnCol(col, data)
               if repairForward:
                 sendOnRow(row, data)
-              if reqProto.rx.haskey((msgId, row, i)):
+              if rx.haskey((msgId, row, i)):
                 echo "Answering requests for ", msgId, row, i
-                for f in reqProto.rx[(msgId, row, i)]:
+                for f in rx[(msgId, row, i)]:
                   f.complete()
 
       if int(col) in cols:
@@ -282,9 +226,9 @@ proc main {.async.} =
                   sendOnRow(row, data)
               if repairForward:
                 sendOnCol(col, data)
-              if reqProto.rx.haskey((msgId, i, col)):
+              if rx.haskey((msgId, i, col)):
                 echo "Answering requests for ", msgId, i, col
-                for f in reqProto.rx[(msgId, i, col)]:
+                for f in rx[(msgId, i, col)]:
                   f.complete()
 
     if messagesChunkCount[msgId] < interest: return
@@ -302,37 +246,30 @@ proc main {.async.} =
     return ValidationResult.Accept
 
   for row in rows:
-    gossipSub.subscribe(dasTopicR(row), messageHandler)
-    gossipSub.addValidator([dasTopicR(row)], messageValidator)
+    netw.subscribe(dasTopicR(row), messageHandler)
+    netw.addValidator([dasTopicR(row)], messageValidator)
 
   for col in cols:
-    gossipSub.subscribe(dasTopicC(col), messageHandler)
-    gossipSub.addValidator([dasTopicC(col)], messageValidator)
+    netw.subscribe(dasTopicC(col), messageHandler)
+    netw.addValidator([dasTopicC(col)], messageValidator)
 
-  switch.mount(gossipSub)
-  switch.mount(pingProtocol)
-  switch.mount(reqProto)
-  await switch.start()
-  #TODO
-  #defer: await switch.stop()
-
-  echo "Listening on ", switch.peerInfo.addrs
-  echo myId, ", ", isPublisher, ", ", switch.peerInfo.peerId
+  echo "Listening on ", netw.switch.peerInfo.addrs
+  echo myId, ", ", isPublisher, ", ", netw.switch.peerInfo.peerId
 
   var peersInfo = toSeq(1..parseInt(getEnv("PEERS")))
   rng.shuffle(peersInfo)
 
-  proc pinger(peerId: PeerId) {.async.} =
-    try:
-      await sleepAsync(20.seconds)
-      while true:
-        let stream = await switch.dial(peerId, PingCodec)
-        let delay = await pingProtocol.ping(stream)
-        await stream.close()
-        #echo delay
-        await sleepAsync(delay)
-    except:
-      echo "Failed to ping"
+  # proc pinger(peerId: PeerId) {.async.} =
+  #   try:
+  #     await sleepAsync(20.seconds)
+  #     while true:
+  #       let stream = await netw.switch.dial(peerId, PingCodec)
+  #       let delay = await pingProtocol.ping(stream)
+  #       await stream.close()
+  #       #echo delay
+  #       await sleepAsync(delay)
+  #   except:
+  #     echo "Failed to ping"
 
   let connectTo = parseInt(getEnv("CONNECTTO"))
   proc connectToPeers(c: int) {.async.} =
@@ -341,7 +278,7 @@ proc main {.async.} =
       if connected >= connectTo: break
       let peerAddr = shadowPeerId2peerAddr(peerInfo)
       try:
-        let peerId = await switch.connect(peerAddr, allowUnknownPeerId=true).wait(5.seconds)
+        let peerId = await netw.switch.connect(peerAddr, allowUnknownPeerId=true).wait(5.seconds)
         #asyncSpawn pinger(peerId)
         connected.inc()
       except CatchableError as exc:
@@ -355,13 +292,13 @@ proc main {.async.} =
   #startOfTest = Moment.now() + milliseconds(warmupMessages * maxMessageDelay div 2)
 
   await sleepAsync(180.seconds)
-  # echo "Mesh size: ", gossipSub.mesh.getOrDefault("test").len
+  # echo "Mesh size: ", netw.getNeighors("test").len
   for row in rows:
     let topic = dasTopicR(row)
-    echo "Mesh size ", topic, " ", gossipSub.mesh.getOrDefault(topic).len
+    echo "Mesh size ", topic, " ", netw.getNeighors(topic).len
   for col in cols:
     let topic = dasTopicC(col)
-    echo "Mesh size ", topic, " ", gossipSub.mesh.getOrDefault(topic).len
+    echo "Mesh size ", topic, " ", netw.getNeighors(topic).len
 
   for msg in 0 ..< msgCount:#client.param(int, "message_count"):
     let startTime = getTime()
@@ -396,16 +333,16 @@ proc main {.async.} =
           echo "sending ", uint64(nowInt.nanoseconds), " r", row, "c", col
           if sendRows:
             nowBytes[16] = 0
-            discard gossipSub.publish(dasTopicR(row), nowBytes, publisherMaxCopies, publisherShufflePeers)
+            discard netw.publish(dasTopicR(row), nowBytes, publisherMaxCopies, publisherShufflePeers)
           if sendCols:
             nowBytes[16] = 1
-            discard gossipSub.publish(dasTopicC(col), nowBytes, publisherMaxCopies, publisherShufflePeers)
+            discard netw.publish(dasTopicC(col), nowBytes, publisherMaxCopies, publisherShufflePeers)
     else:
       ## start sampling
 
       let
         #peers = switch.connectedPeers(Direction.Out) # we might need a bigger set
-        peers = switch.peerStore[AddressBook].book
+        peers = netw.switch.peerStore[AddressBook].book
       echo "Peers:", peers
       var
         colPeers: array[numCols, HashSet[PeerId]]  #peers interested in a given column
@@ -436,7 +373,7 @@ proc main {.async.} =
               tout = (if i == 0: 3 else: 1) # first 3 seconds, then 1
               req = [msg.byte, row.byte, (row shr 8).byte, col.byte, (col shr 8).byte, tout.byte]
               #peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
-              conn = await switch.dial(peerId, ReqCodec)
+              conn = await netw.switch.dial(peerId, gsnetwork.ReqCodec)
             try:
               echo "requesting:", ((getTime()-startTime).inMilliseconds(), i, peerId, msg, row, col)
               await conn.writeLp(req)
