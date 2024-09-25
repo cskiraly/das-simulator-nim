@@ -86,11 +86,11 @@ proc main {.async.} =
     # create handler for incoming connection
     proc handle(stream: Connection, proto: string) {.async.} =
         let
-          req = await stream.readLp(4)
+          req = await stream.readLp(6)
           msgId = req[0].int
-          row = req[1].int
-          col = req[2].int
-          tout = req[3]
+          row = req[1].int + (req[2].int shl 8)
+          col = req[3].int + (req[4].int shl 8)
+          tout = req[5]
           reqDbg = (msgId, stream.peerId, row, col, tout)
         echo "request arrived:", reqDbg
         if messagesChunks.hasKey(msgId) and messagesChunks[msgId][(row,col)] >= 1:
@@ -384,8 +384,10 @@ proc main {.async.} =
       for (row, col) in segmentIt():
           nowBytes[10] = byte(msg)
           nowBytes[12] = byte(row)
+          nowBytes[13] = byte(row shr 8)
           nowBytes[14] = byte(col)
-          echo "sending ", uint64(nowInt.nanoseconds), "r", row, "c", col
+          nowBytes[15] = byte(col shr 8)
+          echo "sending ", uint64(nowInt.nanoseconds), " r", row, "c", col
           if sendRows:
             nowBytes[16] = 0
             discard gossipSub.publish(dasTopicR(row), nowBytes, publisherMaxCopies, publisherShufflePeers)
