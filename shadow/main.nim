@@ -49,6 +49,8 @@ proc main {.async.} =
     repairForward = false # whether to forward repaired chunks on the same line
     repairCrossForward = true # wheher to forward repaired segments on the other dimension
 
+    sampleCount = 71
+
     printGossipSubStats = false
   const
     interest = numRows * custodyCols + (numCols-custodyCols) * custodyRows
@@ -354,11 +356,10 @@ proc main {.async.} =
     echo "Mesh size ", topic, " ", gossipSub.mesh.getOrDefault(topic).len
 
   for msg in 0 ..< 10:#client.param(int, "message_count"):
+    let startTime = getTime()
     if msg mod publisherCount == myId - 1:
     #if myId == 1:
-      let
-        now = getTime()
-        nowInt = seconds(now.toUnix()) + nanoseconds(times.nanosecond(now))
+      let nowInt = seconds(startTime.toUnix()) + nanoseconds(times.nanosecond(startTime))
       var nowBytes = @(toBytesLE(uint64(nowInt.nanoseconds))) & newSeq[byte](blocksize div (numRowsK*numColsK))
       echo "sending ", uint64(nowInt.nanoseconds)
 
@@ -390,9 +391,7 @@ proc main {.async.} =
             nowBytes[16] = 1
             discard gossipSub.publish(dasTopicC(col), nowBytes, publisherMaxCopies, publisherShufflePeers)
     else:
-      #sample
-      let
-        sampleCount = 1
+      ## start sampling
 
       let
         #peers = switch.connectedPeers(Direction.Out) # we might need a bigger set
@@ -413,45 +412,59 @@ proc main {.async.} =
       echo "colPeers:", colPeers
       echo "rowPeers:", rowPeers
 
-      proc sample(row, col: int) {.async.} =
+      proc sampleOne(msg, row, col: int): Future[bool] {.async.} =
         # select peer
         var candidates = toSeq(rowPeers[row] + colPeers[col])
         random.shuffle(candidates)
         if candidates.len == 0:
           echo "Warning, not enoough peers for ", "r", row, "c", col
           #TODO: look for new peers
-          return
+          return false
         for i, peerId in candidates.pairs:
           try:
             let
-              tout = 3
-              req = [msg.byte, row.byte, col.byte, tout.byte]
+              tout = (if i == 0: 3 else: 1) # first 3 seconds, then 1
+              req = [msg.byte, row.byte, (row shr 8).byte, col.byte, (col shr 8).byte, tout.byte]
               #peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
               conn = await switch.dial(peerId, ReqCodec)
             try:
-              echo "requesting:", (i, peerId, msg, row, col)
+              echo "requesting:", ((getTime()-startTime).inMilliseconds(), i, peerId, msg, row, col)
               await conn.writeLp(req)
               let resp = await conn.readLp(1) #TODO: add timeout here
-              echo "Received sample ", (peerId, msg, row, col)
-              return
+              echo "Received sample ", ((getTime()-startTime).inMilliseconds(), peerId, msg, row, col)
+              return true
             except CatchableError as exc:
-              echo "ReqResp error ", exc.msg
+              echo "ReqResp error ", (getTime()-startTime).inMilliseconds(), exc.msg
           except CatchableError as exc:
             echo "Failed to dial: ", exc.msg
 
         #no one responded
-        raise newException(CatchableError, "Segment can't be retrieved")
+        return false
 
+      proc sampleMany(msg, sampleCount: int): Future[bool] {.async.} =
+        var
+          sampleR = toSeq(0..<numRows)
+          sampleC = toSeq(0..<numCols)
+        random.shuffle(sampleR)
+        random.shuffle(sampleC)
 
-      var
-        sampleR = toSeq(0..<numRows)
-        sampleC = toSeq(0..<numCols)
-      random.shuffle(sampleR)
-      random.shuffle(sampleC)
+        assert(numRows >= sampleCount)
+        assert(numCols >= sampleCount)
 
-      assert(numRows >= sampleCount)
-      assert(numCols >= sampleCount)
-      for i in 0..<sampleCount:
+        var sampling : seq[Future[bool]]
+        for i in 0..<sampleCount:
+          sampling.add(sampleOne(msg, sampleR[i], sampleC[i]))
+
+        let 
+          samplingResult = await allFinished(sampling)
+          success = samplingResult.mapIt(it.read).count(true)
+        echo "Sampling result:", ((getTime()-startTime).inMilliseconds(), success, sampleCount)
+        if (success == sampleCount):
+          echo msg,"-s", " milliseconds: ", (getTime()-startTime).inMilliseconds()
+
+        return (success == sampleCount)
+
+      discard sampleMany(msg, sampleCount)
 
     #wait for next slot
     await sleepAsync(12.seconds)
