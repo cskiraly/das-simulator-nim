@@ -51,6 +51,8 @@ proc main {.async.} =
 
     sampleCount = 71
 
+    msgCount = 3
+
     printGossipSubStats = false
   const
     interest = numRows * custodyCols + (numCols-custodyCols) * custodyRows
@@ -355,7 +357,7 @@ proc main {.async.} =
     let topic = dasTopicC(col)
     echo "Mesh size ", topic, " ", gossipSub.mesh.getOrDefault(topic).len
 
-  for msg in 0 ..< 10:#client.param(int, "message_count"):
+  for msg in 0 ..< msgCount:#client.param(int, "message_count"):
     let startTime = getTime()
     if msg mod publisherCount == myId - 1:
     #if myId == 1:
