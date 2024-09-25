@@ -29,6 +29,9 @@ proc main {.async.} =
   # make sure random is random
   randomize()
 
+  let
+    custodyRows = parseInt(getEnv("CUSTODY"))   # rows to custody (=topics to sbscribe)
+    custodyCols = parseInt(getEnv("CUSTODY"))
   const
     blocksize = 2^21  # size of DAS block, before EC, in bytes
     numRows = 128      # number of Rows after EC
@@ -54,7 +57,7 @@ proc main {.async.} =
     msgCount = 3
 
     printGossipSubStats = false
-  const
+  let
     interest = numRows * custodyCols + (numCols-custodyCols) * custodyRows
   let
     hostname = getHostname()

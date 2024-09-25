@@ -15,7 +15,7 @@ x-constants:
     processes:
     - path: ./main
       start_time: 5s
-      environment: {"PEERS": "100", "CONNECTTO": "200"}
+      environment: {"PEERS": "1000", "CONNECTTO": "300", "CUSTODY": "8"}
   - &SlowHost
     network_node_id: 0
     bandwidth_up: "20 Mbit"
@@ -23,7 +23,7 @@ x-constants:
     processes:
     - path: ./main
       start_time: 5s
-      environment: {"PEERS": "100", "CONNECTTO": "200"}
+      environment: {"PEERS": "1000", "CONNECTTO": "300", "CUSTODY": "8"}
 
 
 network:
