@@ -38,8 +38,6 @@ proc main {.async.} =
     numRowsK = 64     # number of Rows before EC
     numCols = 128
     numColsK = 64
-    custodyRows = 4   # rows to custody (=topics to sbscribe)
-    custodyCols = 4
     sendRows = true   # whether the publisher send out on row topics
     sendCols = true
     crossForward = true   # whether to relay received segments in the other dimension (row->col, col->row)
