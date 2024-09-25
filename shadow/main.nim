@@ -354,7 +354,6 @@ proc main {.async.} =
     echo "Mesh size ", topic, " ", gossipSub.mesh.getOrDefault(topic).len
 
   for msg in 0 ..< 10:#client.param(int, "message_count"):
-    await sleepAsync(12.seconds)
     if msg mod publisherCount == myId - 1:
     #if myId == 1:
       let
@@ -453,7 +452,9 @@ proc main {.async.} =
       assert(numRows >= sampleCount)
       assert(numCols >= sampleCount)
       for i in 0..<sampleCount:
-        await sample(sampleR[i], sampleC[i])
+
+    #wait for next slot
+    await sleepAsync(12.seconds)
 
   #echo "BW: ", libp2p_protocols_bytes.value(labelValues=["/meshsub/1.1.0", "in"]) + libp2p_protocols_bytes.value(labelValues=["/meshsub/1.1.0", "out"])
   #echo "DUPS: ", libp2p_gossipsub_duplicate.value(), " / ", libp2p_gossipsub_received.value()
