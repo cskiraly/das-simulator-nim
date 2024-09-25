@@ -196,8 +196,8 @@ proc main {.async.} =
     let
       sentUint = uint64.fromBytesLE(data)
       msgId = data[10].int
-      row = data[12].int # TODO: use 2 bytes
-      col = data[14].int
+      row = data[12].int + (data[13].int shl 8)
+      col = data[14].int + (data[15].int shl 8)
       roc = topic.isTopicR # Row or Column
 
     # warm-up
