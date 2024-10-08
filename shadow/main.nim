@@ -220,7 +220,7 @@ proc main {.async.} =
               if repairForward:
                 sendOnRow(row, data)
               if rx.haskey((msgId, row, i)):
-                echo "Answering requests for ", msgId, row, i
+                echo "Answering requests for ", msgId, " r", row, "c", i
                 for f in rx[(msgId, row, i)]:
                   f.complete()
 
@@ -237,7 +237,7 @@ proc main {.async.} =
               if repairForward:
                 sendOnCol(col, data)
               if rx.haskey((msgId, i, col)):
-                echo "Answering requests for ", msgId, i, col
+                echo "Answering requests for ", msgId, " r", i, "c", col
                 for f in rx[(msgId, i, col)]:
                   f.complete()
 
