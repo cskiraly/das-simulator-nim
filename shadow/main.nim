@@ -1,5 +1,5 @@
 import stew/endians2, stew/byteutils, tables, strutils, os
-import vendor/nim-libp2p/libp2p, vendor/nim-libp2p/libp2p/protocols/pubsub/rpc/messages
+import vendor/nim-libp2p/libp2p#, vendor/nim-libp2p/libp2p/protocols/pubsub/rpc/messages
 import vendor/nim-libp2p/libp2p/muxers/mplex/lpchannel, vendor/nim-libp2p/libp2p/protocols/ping
 import chronos
 import random # need since rng leads to "Error: internal error: could not find env param for segmentItRandom"
@@ -76,31 +76,23 @@ proc main {.async.} =
   ##    
   var rx: Table[(int, int, int), seq[Future[void]]] = initTable[(int, int, int), seq[Future[void]]]()
   # create handler for incoming connection
-  proc reqHandler(stream: Connection, proto: string) {.async.} =
-        let
-          req = await stream.readLp(6)
-          msgId = req[0].int
-          row = req[1].int + (req[2].int shl 8)
-          col = req[3].int + (req[4].int shl 8)
-          tout = req[5]
-          reqDbg = (msgId, stream.peerId, row, col, tout)
-        echo "request arrived:", reqDbg
-        if messagesChunks.hasKey(msgId) and messagesChunks[msgId][(row,col)] >= 1:
+
+  proc reqHandler(m: reqMessage, src: PeerId): Future[Option[respMessage]] {.async.} =
+        let reqDbg = (m.msgId, src, m.row, m.col, m.tout)
+        if messagesChunks.hasKey(m.msgId) and messagesChunks[m.msgId][(m.row,m.col)] >= 1:
           echo "already heaving", reqDbg
         else:
           echo "waiting for", reqDbg
           let f = newFuture[void]()
-          rx.mgetOrPut((msgId, row, col), newSeq[Future[void]]()).add(f)
-          if await f.withTimeout(tout.seconds):
-            rx[(msgId, row, col)].delete(rx[(msgId, row, col)].find(f))
+          rx.mgetOrPut((m.msgId, m.row, m.col), newSeq[Future[void]]()).add(f)
+          if await f.withTimeout(m.tout.seconds):
+            rx[(m.msgId, m.row, m.col)].delete(rx[(m.msgId, m.row, m.col)].find(f))
           else:
             echo "tout expired for", reqDbg
-            await stream.close()
             return
 
         echo "responding for", reqDbg
-        await stream.writeLp([1.byte]) # TODO: send segment      
-        await stream.close()
+        some(respMessage(code: 1.byte)) # TODO: send segment
 
   let netw = await gsnetwork.init(reqHandler)
 
@@ -249,7 +241,7 @@ proc main {.async.} =
   var
     startOfTest: Moment
     attackAfter = 10000.hours
-  proc messageValidator(topic: string, msg: Message): Future[ValidationResult] {.async.} =
+  proc messageValidator(topic: string, msg: NetworkMessage): Future[ValidationResult] {.async.} =
     if isAttacker and Moment.now - startOfTest >= attackAfter:
       return ValidationResult.Ignore
 

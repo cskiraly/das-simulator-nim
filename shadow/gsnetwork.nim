@@ -11,6 +11,14 @@ type
   Network = ref object
     switch*: Switch
     gossipSub: GossipSub
+  NetworkMessage* = Message
+  reqMessage* = ref object
+    msgId*: int
+    row*: int
+    col*: int
+    tout*: byte
+  respMessage* = ref object
+    code*: byte
 
 const ReqCodec* = "/nim-libp2p/req/1.0.0"
 type
@@ -30,6 +38,22 @@ proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
 
 proc init*(reqHandler: auto) : Future[Network] {.async.} = 
+  proc handler(stream: Connection, proto: string) {.async.} =
+        let
+          req = await stream.readLp(6)
+          msgId = req[0].int
+          row = req[1].int + (req[2].int shl 8)
+          col = req[3].int + (req[4].int shl 8)
+          tout = req[5]
+          reqDbg = (msgId, stream.peerId, row, col, tout)
+        echo "request arrived:", reqDbg
+        let
+          msg = reqMessage(msgId: msgId, row: row, col: col, tout: tout)
+          resp = await reqHandler(msg, stream.peerId)
+        if resp.isSome:
+          await stream.writeLp([resp.get().code])
+        await stream.close()
+
   let
     rng = libp2p.newRng()
     address = initTAddress("0.0.0.0:5000")
@@ -54,7 +78,7 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
       anonymize = true,
       )
     pingProtocol = Ping.new(rng=rng)
-    reqProto = ReqProto.new(reqHandler)
+    reqProto = ReqProto.new(handler)
 
   gossipSub.parameters.floodPublish = false
   #gossipSub.parameters.lazyPushThreshold = 1_000_000_000
