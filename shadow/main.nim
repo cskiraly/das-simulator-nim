@@ -1,6 +1,5 @@
 import stew/endians2, stew/byteutils, tables, strutils, os
-import vendor/nim-libp2p/libp2p#, vendor/nim-libp2p/libp2p/protocols/pubsub/rpc/messages
-import vendor/nim-libp2p/libp2p/muxers/mplex/lpchannel, vendor/nim-libp2p/libp2p/protocols/ping
+import vendor/nim-libp2p/libp2p
 import chronos
 import random # need since rng leads to "Error: internal error: could not find env param for segmentItRandom"
 import sequtils, hashes, math, metrics
@@ -241,6 +240,7 @@ proc main {.async.} =
   var
     startOfTest: Moment
     attackAfter = 10000.hours
+
   proc messageValidator(topic: string, msg: NetworkMessage): Future[ValidationResult] {.async.} =
     if isAttacker and Moment.now - startOfTest >= attackAfter:
       return ValidationResult.Ignore

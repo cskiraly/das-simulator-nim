@@ -77,7 +77,7 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
       verifySignature = false,
       anonymize = true,
       )
-    pingProtocol = Ping.new(rng=rng)
+    #pingProtocol = Ping.new(rng=rng)
     reqProto = ReqProto.new(handler)
 
   gossipSub.parameters.floodPublish = false
@@ -101,7 +101,7 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
   )
 
   switch.mount(gossipSub)
-  switch.mount(pingProtocol)
+  #switch.mount(pingProtocol)
   switch.mount(reqProto)
   await switch.start()
   #TODO
