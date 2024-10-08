@@ -36,6 +36,7 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
     switch =
       SwitchBuilder
         .new()
+        .withAgentVersion(getEnv("CUSTODY"))
         .withAddress(MultiAddress.init(address).tryGet())
         .withRng(rng)
         #.withYamux()

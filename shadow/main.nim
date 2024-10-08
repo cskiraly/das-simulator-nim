@@ -105,18 +105,28 @@ proc main {.async.} =
   let netw = await gsnetwork.init(reqHandler)
 
   proc peerToRows(peerId: PeerId) : seq[int] =
+    let peerCustody =
+      try:
+        parseInt(netw.switch.peerStore[AgentBook][peerId])
+      except CatchableError as exc:
+        parseInt(getEnv("CUSTODY"))
     result = toSeq(0..<numRows)
     if not isPublisher:
       var rng = peerId2rng(peerId, "rows")
       rng.shuffle(result)
-      result = result[0..<custodyRows]
+      result = result[0..<peerCustody]
 
   proc peerToCols(peerId: PeerId) : seq[int] =
+    let peerCustody =
+      try:
+        parseInt(netw.switch.peerStore[AgentBook][peerId])
+      except CatchableError as exc:
+        parseInt(getEnv("CUSTODY"))
     result = toSeq(0..<numCols)
     if not isPublisher:
       var rng = peerId2rng(peerId, "cols")
       rng.shuffle(result)
-      result = result[0..<custodyCols]
+      result = result[0..<peerCustody]
 
   var rows = peerToRows(netw.getPeerId())
   var cols = peerToCols(netw.getPeerId())
