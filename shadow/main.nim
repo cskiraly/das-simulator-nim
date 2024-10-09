@@ -5,15 +5,16 @@ import random # need since rng leads to "Error: internal error: could not find e
 import sequtils, hashes, math, metrics
 from times import getTime, toUnix, fromUnix, `-`, initTime, `$`, inMilliseconds, Duration
 from nativesockets import getHostname
+import options
 
 import gsnetwork
 
-proc shadowPeerId2peerAddr(i: int): MultiAddress =
+proc shadowPeerId2peerAddr(i: int): NetworkAddress =
   ## convert Shadow node ID to address
   let tAddress = "peer" & $i & ":5000"
-  resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())[0]
+  resolveAddress(tAddress)
 
-proc peerAddr2rng(peerAddr: MultiAddress, usecase: auto): Rand =
+proc peerAddr2rng(peerAddr: NetworkAddress, usecase: auto): Rand =
   ## get an RNG for a given peer
   let seed =  hash((peerAddr, usecase))
   initRand(seed)
@@ -63,7 +64,7 @@ proc main {.async.} =
     isPublisher = myId <= publisherCount
     #isAttacker = (not isPublisher) and myId - publisherCount <= client.param(int, "attacker_count")
     isAttacker = false
-    rng = libp2p.newRng()
+    rng = gsnetwork.newRng()
     #randCountry = rng.rand(distribCumSummed[^1])
     #country = distribCumSummed.find(distribCumSummed.filterIt(it >= randCountry)[0])
 
@@ -76,8 +77,8 @@ proc main {.async.} =
   var rx: Table[(int, int, int), seq[Future[void]]] = initTable[(int, int, int), seq[Future[void]]]()
   # create handler for incoming connection
 
-  proc reqHandler(m: reqMessage, src: PeerId): Future[Option[respMessage]] {.async.} =
-        let reqDbg = (m.msgId, src, m.row, m.col, m.tout)
+  proc reqHandler(m: reqMessage): Future[Option[respMessage]] {.async.} =
+        let reqDbg = (m.msgId, m.row, m.col, m.tout)
         if messagesChunks.hasKey(m.msgId) and messagesChunks[m.msgId][(m.row,m.col)] >= 1:
           echo "already heaving", reqDbg
         else:
@@ -93,12 +94,13 @@ proc main {.async.} =
         echo "responding for", reqDbg
         some(respMessage(code: 1.byte)) # TODO: send segment
 
+  # initialize network stack
   let netw = await gsnetwork.init(reqHandler)
 
   proc peerToRows(peerId: PeerId) : seq[int] =
     let peerCustody =
       try:
-        parseInt(netw.switch.peerStore[AgentBook][peerId])
+        netw.getCustody(peerId)
       except CatchableError as exc:
         parseInt(getEnv("CUSTODY"))
     result = toSeq(0..<numRows)
@@ -110,7 +112,7 @@ proc main {.async.} =
   proc peerToCols(peerId: PeerId) : seq[int] =
     let peerCustody =
       try:
-        parseInt(netw.switch.peerStore[AgentBook][peerId])
+        netw.getCustody(peerId)
       except CatchableError as exc:
         parseInt(getEnv("CUSTODY"))
     result = toSeq(0..<numCols)
@@ -373,13 +375,9 @@ proc main {.async.} =
           try:
             let
               tout = (if i == 0: 3 else: 1) # first 3 seconds, then 1
-              req = [msg.byte, row.byte, (row shr 8).byte, col.byte, (col shr 8).byte, tout.byte]
-              #peerId = await switch.connect(addrs[0], allowUnknownPeerId=true).wait(5.seconds)
-              conn = await netw.switch.dial(peerId, gsnetwork.ReqCodec)
             try:
               echo "requesting:", ((getTime()-startTime).inMilliseconds(), i, peerId, msg, row, col)
-              await conn.writeLp(req)
-              let resp = await conn.readLp(1) #TODO: add timeout here
+              let resp = await netw.request(peerId, reqMessage(msgId: msg, row: row, col: col, tout: tout.byte))
               echo "Received sample ", ((getTime()-startTime).inMilliseconds(), peerId, msg, row, col)
               return true
             except CatchableError as exc:

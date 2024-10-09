@@ -3,7 +3,7 @@ import vendor/nim-libp2p/libp2p, vendor/nim-libp2p/libp2p/protocols/pubsub/rpc/m
 import vendor/nim-libp2p/libp2p/muxers/mplex/lpchannel, vendor/nim-libp2p/libp2p/protocols/ping
 import chronos
 import random # need since rng leads to "Error: internal error: could not find env param for segmentItRandom"
-import hashes
+import sequtils, hashes
 from times import getTime, toUnix, fromUnix, `-`, initTime, `$`, inMilliseconds, Duration
 from nativesockets import getHostname
 
@@ -12,6 +12,7 @@ type
     switch*: Switch
     gossipSub: GossipSub
   NetworkMessage* = Message
+  NetworkAddress* = MultiAddress
   reqMessage* = ref object
     msgId*: int
     row*: int
@@ -19,6 +20,13 @@ type
     tout*: byte
   respMessage* = ref object
     code*: byte
+
+export peerId
+export ValidationResult
+export shuffle
+
+proc newRng*() : auto =
+  libp2p.newRng()
 
 const ReqCodec* = "/nim-libp2p/req/1.0.0"
 type
@@ -34,22 +42,38 @@ proc new(T: typedesc[ReqProto], reqHandler: auto): T =
   reqproto.codec = ReqCodec
   return reqproto
 
+proc getCustody*(n: Network, peerId: PeerId) : int =
+  parseInt(n.switch.peerStore[AgentBook][peerId])
+
 proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
+
+proc resolveAddress*(tAddress: string) : MultiAddress =
+  resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())[0]
+
+proc reqDecode(req: seq[byte]): reqMessage = 
+  let
+    msgId = req[0].int
+    row = req[1].int + (req[2].int shl 8)
+    col = req[3].int + (req[4].int shl 8)
+    tout = req[5]
+  echo "request arrived:", (msgId, row, col, tout)
+  reqMessage(msgId: msgId, row: row, col: col, tout: tout)
+
+proc reqEncode(req: reqMessage): seq[byte] =
+  @[req.msgId.byte, req.row.byte, (req.row shr 8).byte, req.col.byte, (req.col shr 8).byte, req.tout.byte]
+
+proc request*(n: Network, peerId: PeerId, req: reqMessage): Future[respMessage] {.async.} =
+  let conn = await n.switch.dial(peerId, gsnetwork.ReqCodec)
+  await conn.writeLp(reqEncode(req))
+  let resp = await conn.readLp(1) #TODO: add timeout here
+  respMessage(code: resp[0])
 
 proc init*(reqHandler: auto) : Future[Network] {.async.} = 
   proc handler(stream: Connection, proto: string) {.async.} =
         let
-          req = await stream.readLp(6)
-          msgId = req[0].int
-          row = req[1].int + (req[2].int shl 8)
-          col = req[3].int + (req[4].int shl 8)
-          tout = req[5]
-          reqDbg = (msgId, stream.peerId, row, col, tout)
-        echo "request arrived:", reqDbg
-        let
-          msg = reqMessage(msgId: msgId, row: row, col: col, tout: tout)
-          resp = await reqHandler(msg, stream.peerId)
+          msg = reqDecode(await stream.readLp(6))
+          resp = await reqHandler(msg) #, stream.peerId)
         if resp.isSome:
           await stream.writeLp([resp.get().code])
         await stream.close()
