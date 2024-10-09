@@ -14,16 +14,6 @@ proc shadowPeerId2peerAddr(i: int): NetworkAddress =
   let tAddress = "peer" & $i & ":5000"
   resolveAddress(tAddress)
 
-proc peerAddr2rng(peerAddr: NetworkAddress, usecase: auto): Rand =
-  ## get an RNG for a given peer
-  let seed =  hash((peerAddr, usecase))
-  initRand(seed)
-
-proc peerId2rng(peerId: PeerId, usecase: auto): Rand =
-  ## get an RNG for a given peer
-  let seed =  hash((peerId, usecase))
-  initRand(seed)
-
 proc main {.async.} =
   # make sure random is random
   randomize()
@@ -97,7 +87,7 @@ proc main {.async.} =
   # initialize network stack
   let netw = await gsnetwork.init(reqHandler)
 
-  proc peerToRows(peerId: PeerId) : seq[int] =
+  proc peerToRows(peerId: NetworkPeerId) : seq[int] =
     let peerCustody =
       try:
         netw.getCustody(peerId)
@@ -109,7 +99,7 @@ proc main {.async.} =
       rng.shuffle(result)
       result = result[0..<peerCustody]
 
-  proc peerToCols(peerId: PeerId) : seq[int] =
+  proc peerToCols(peerId: NetworkPeerId) : seq[int] =
     let peerCustody =
       try:
         netw.getCustody(peerId)
@@ -282,7 +272,7 @@ proc main {.async.} =
       if connected >= connectTo: break
       let peerAddr = shadowPeerId2peerAddr(peerInfo)
       try:
-        let peerId = await netw.switch.connect(peerAddr, allowUnknownPeerId=true).wait(5.seconds)
+        let peerId = await netw.connect(peerAddr).wait(5.seconds)
         #asyncSpawn pinger(peerId)
         connected.inc()
       except CatchableError as exc:
@@ -346,13 +336,13 @@ proc main {.async.} =
 
       let
         #peers = switch.connectedPeers(Direction.Out) # we might need a bigger set
-        peers = netw.switch.peerStore[AddressBook].book
-      echo "Peers:", peers
+        peers = netw.getPeers()
+      #echo "Peers:", peers
       var
-        colPeers: array[numCols, HashSet[PeerId]]  #peers interested in a given column
-        rowPeers: array[numRows, HashSet[PeerId]]
+        colPeers: array[numCols, HashSet[NetworkPeerId]]  #peers interested in a given column
+        rowPeers: array[numRows, HashSet[NetworkPeerId]]
 
-      for peerId in peers.keys:
+      for peerId in peers:
         let
           cols = peerToCols(peerId)
           rows = peerToRows(peerId)

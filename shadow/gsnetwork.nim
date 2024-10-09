@@ -7,12 +7,18 @@ import sequtils, hashes
 from times import getTime, toUnix, fromUnix, `-`, initTime, `$`, inMilliseconds, Duration
 from nativesockets import getHostname
 
+export ValidationResult
+export shuffle
+
 type
   Network = ref object
     switch*: Switch
     gossipSub: GossipSub
+    udpTransport: DatagramTransport
   NetworkMessage* = Message
   NetworkAddress* = MultiAddress
+  NetworkPeerId* = ref object
+    peerId: PeerId
   reqMessage* = ref object
     msgId*: int
     row*: int
@@ -21,12 +27,23 @@ type
   respMessage* = ref object
     code*: byte
 
-export peerId
-export ValidationResult
-export shuffle
+proc hash*(x: NetworkPeerId): Hash =
+  var h: Hash = 0
+  h = h !& hash(x.peerId)
+  result = !$h
 
 proc newRng*() : auto =
   libp2p.newRng()
+
+proc peerAddr2rng*(peerAddr: NetworkAddress, usecase: auto): Rand =
+  ## get an RNG for a given peer
+  let seed =  hash((peerAddr, usecase))
+  initRand(seed)
+
+proc peerId2rng*(peerId: NetworkPeerId, usecase: auto): Rand =
+  ## get an RNG for a given peer
+  let seed =  hash((peerId.peerId, usecase))
+  initRand(seed)
 
 const ReqCodec* = "/nim-libp2p/req/1.0.0"
 type
@@ -42,8 +59,8 @@ proc new(T: typedesc[ReqProto], reqHandler: auto): T =
   reqproto.codec = ReqCodec
   return reqproto
 
-proc getCustody*(n: Network, peerId: PeerId) : int =
-  parseInt(n.switch.peerStore[AgentBook][peerId])
+proc getCustody*(n: Network, peerId: NetworkPeerId) : int =
+  parseInt(n.switch.peerStore[AgentBook][peerId.peerId])
 
 proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
@@ -63,11 +80,18 @@ proc reqDecode(req: seq[byte]): reqMessage =
 proc reqEncode(req: reqMessage): seq[byte] =
   @[req.msgId.byte, req.row.byte, (req.row shr 8).byte, req.col.byte, (req.col shr 8).byte, req.tout.byte]
 
-proc request*(n: Network, peerId: PeerId, req: reqMessage): Future[respMessage] {.async.} =
-  let conn = await n.switch.dial(peerId, gsnetwork.ReqCodec)
+proc request*(n: Network, peerId: NetworkPeerId, req: reqMessage): Future[respMessage] {.async.} =
+  # send request
+  let conn = await n.switch.dial(peerId.peerId, gsnetwork.ReqCodec)
   await conn.writeLp(reqEncode(req))
+  # wait response
   let resp = await conn.readLp(1) #TODO: add timeout here
   respMessage(code: resp[0])
+
+#proc request2*(n: Network, peerId: PeerId, req: reqMessage): Future[respMessage] {.async.} =
+  # send request
+  #n.udpTransport.sendTo(raddr, 0.byte & reqEncode(req))
+  # wait response
 
 proc init*(reqHandler: auto) : Future[Network] {.async.} = 
   proc handler(stream: Connection, proto: string) {.async.} =
@@ -77,6 +101,24 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
         if resp.isSome:
           await stream.writeLp([resp.get().code])
         await stream.close()
+
+  proc udpHandler(transp: DatagramTransport,
+               raddr: TransportAddress): Future[void] {.async: (raises: []).} =
+      try:
+        let
+          pbytes = transp.getMessage()
+        if pbytes[0] == 0:
+          # request arrived
+          let req = reqDecode(pbytes[1..^1])
+          echo "received", pbytes
+          let resp = await reqHandler(req)
+          if resp.isSome:
+            await transp.sendTo(raddr, @[resp.get().code])
+        else:
+          # response arrived. Search for request and notify
+          echo "response arrived"
+      except CatchableError as exc:
+        raiseAssert exc.msg
 
   let
     rng = libp2p.newRng()
@@ -130,7 +172,18 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
   await switch.start()
   #TODO
   #defer: await switch.stop()
-  Network(switch: switch, gossipSub: gossipSub)
+
+  # initialize UDP port
+  let
+    ta = initTAddress("0.0.0.0:5000")
+    udpTransport = newDatagramTransport(udpHandler, local = ta)
+
+  Network(switch: switch, gossipSub: gossipSub, udpTransport:udpTransport)
+
+method connect*(n: Network, peerAddr: NetworkAddress): Future[NetworkPeerId] {.async}=
+  let 
+    peerId = await n.switch.connect(peerAddr, allowUnknownPeerId=true)
+  NetworkPeerId(peerId: peerId)
 
 method publish*(n: Network,
                 topic: string,
@@ -152,8 +205,14 @@ method addValidator*(n: Network,
 
     n.gossipSub.addValidator(topic, hook)
 
-method getPeerId*(n: Network) : PeerId {.raises: [].} =
-    n.gossipSub.switch.peerInfo.peerId
+method getPeerId*(n: Network) : NetworkPeerId {.raises: [].} =
+    NetworkPeerId(peerId: n.gossipSub.switch.peerInfo.peerId)
 
 method getNeighors*(n: Network, topic: string) : auto {.raises: [].} =
     n.gossipSub.mesh.getOrDefault(topic)
+
+method getPeers*(n: Network): seq[NetworkPeerId] {.raises: [].} =
+  let
+    peers = n.switch.peerStore[AddressBook].book
+  for p in peers.keys:
+    result &= NetworkPeerId(peerId: p)
