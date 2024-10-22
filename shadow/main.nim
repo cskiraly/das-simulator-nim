@@ -252,18 +252,6 @@ proc main {.async.} =
   var peersInfo = toSeq(1..parseInt(getEnv("PEERS")))
   rng.shuffle(peersInfo)
 
-  # proc pinger(peerId: PeerId) {.async.} =
-  #   try:
-  #     await sleepAsync(20.seconds)
-  #     while true:
-  #       let stream = await netw.switch.dial(peerId, PingCodec)
-  #       let delay = await pingProtocol.ping(stream)
-  #       await stream.close()
-  #       #echo delay
-  #       await sleepAsync(delay)
-  #   except:
-  #     echo "Failed to ping"
-
   let connectTo = parseInt(getEnv("CONNECTTO"))
   proc connectToPeers(c: int) {.async.} =
     var connected = 0
@@ -272,7 +260,6 @@ proc main {.async.} =
       let peerAddr = shadowPeerId2peerAddr(peerInfo)
       try:
         let peerId = await netw.connect(peerAddr).wait(5.seconds)
-        #asyncSpawn pinger(peerId)
         connected.inc()
       except CatchableError as exc:
         echo "Failed to dial", exc.msg
