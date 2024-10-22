@@ -6,7 +6,7 @@ from times import getTime, toUnix, fromUnix, `-`, initTime, `$`, inMilliseconds,
 from nativesockets import getHostname
 import options
 
-import gsnetwork
+import udpnetwork
 
 proc shadowPeerId2peerAddr(i: int): NetworkAddress =
   ## convert Shadow node ID to address
@@ -53,7 +53,7 @@ proc main {.async.} =
     isPublisher = myId <= publisherCount
     #isAttacker = (not isPublisher) and myId - publisherCount <= client.param(int, "attacker_count")
     isAttacker = false
-    rng = gsnetwork.newRng()
+    rng = udpnetwork.newRng()
     #randCountry = rng.rand(distribCumSummed[^1])
     #country = distribCumSummed.find(distribCumSummed.filterIt(it >= randCountry)[0])
 
@@ -84,7 +84,7 @@ proc main {.async.} =
         some(respMessage(code: 1.byte)) # TODO: send segment
 
   # initialize network stack
-  let netw = await gsnetwork.init(reqHandler)
+  let netw = await udpnetwork.init(reqHandler)
 
   proc peerToRows(peerId: NetworkPeerId) : seq[int] =
     let peerCustody =
