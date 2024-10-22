@@ -12,13 +12,15 @@ export shuffle
 
 type
   Network = ref object
-    switch*: Switch
+    switch: Switch
     gossipSub: GossipSub
     udpTransport: DatagramTransport
+    reqs: Table[int, Future[void]]
   NetworkMessage* = Message
-  NetworkAddress* = MultiAddress
+  NetworkAddress* = TransportAddress
   NetworkPeerId* = ref object
     peerId: PeerId
+    address: NetworkAddress
   reqMessage* = ref object
     msgId*: int
     row*: int
@@ -26,6 +28,7 @@ type
     tout*: byte
   respMessage* = ref object
     code*: byte
+  ReqHandler* = proc (m: reqMessage): Future[Option[respMessage]] {.async.}
 
 proc hash*(x: NetworkPeerId): Hash =
   var h: Hash = 0
@@ -45,7 +48,7 @@ proc peerId2rng*(peerId: NetworkPeerId, usecase: auto): Rand =
   let seed =  hash((peerId.peerId, usecase))
   initRand(seed)
 
-const ReqCodec* = "/nim-libp2p/req/1.0.0"
+const ReqCodec = "/nim-libp2p/req/1.0.0"
 type
   ReqProto = ref object of LPProtocol
     #rx: Table[(int, int, int), seq[Future[void]]]
@@ -65,8 +68,12 @@ proc getCustody*(n: Network, peerId: NetworkPeerId) : int =
 proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
 
-proc resolveAddress*(tAddress: string) : MultiAddress =
-  resolveTAddress(tAddress).mapIt(MultiAddress.init(it).tryGet())[0]
+proc resolveAddress*(tAddress: string) : TransportAddress =
+  ## resolve "hostname:port" or "ip:port" to TransportAddress
+  resolveTAddress(tAddress)[0]
+  # let ma = ta.mapIt(MultiAddress.init(it).tryGet())[0]
+  # echo "resolveAddress: ", ta, ma
+  # ma
 
 proc reqDecode(req: seq[byte]): reqMessage = 
   let
@@ -88,12 +95,18 @@ proc request*(n: Network, peerId: NetworkPeerId, req: reqMessage): Future[respMe
   let resp = await conn.readLp(1) #TODO: add timeout here
   respMessage(code: resp[0])
 
-#proc request2*(n: Network, peerId: PeerId, req: reqMessage): Future[respMessage] {.async.} =
+var reqId: int = 0
+proc request2*(n: Network, peerId: NetworkPeerId, req: reqMessage): Future[respMessage] {.async.} =
   # send request
-  #n.udpTransport.sendTo(raddr, 0.byte & reqEncode(req))
+  echo peerId.address
+  await n.udpTransport.sendTo(peerId.address, @[0.byte, reqId.byte] & reqEncode(req))
   # wait response
+  let f = newFuture[void]()
+  n.reqs[reqId] = f
+  reqId += 1
+  await f
 
-proc init*(reqHandler: auto) : Future[Network] {.async.} = 
+proc init*(reqHandler: ReqHandler) : Future[Network] {.async.} = 
   proc handler(stream: Connection, proto: string) {.async.} =
         let
           msg = reqDecode(await stream.readLp(6))
@@ -102,21 +115,26 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
           await stream.writeLp([resp.get().code])
         await stream.close()
 
+  var reqs: Table[int, Future[void]] = initTable[int, Future[void]]()
+
   proc udpHandler(transp: DatagramTransport,
                raddr: TransportAddress): Future[void] {.async: (raises: []).} =
       try:
-        let
-          pbytes = transp.getMessage()
-        if pbytes[0] == 0:
+        let pbytes = transp.getMessage()
+        if pbytes[0] == 0: # request
           # request arrived
-          let req = reqDecode(pbytes[1..^1])
+          let reqId = pbytes[1]
+          let req = reqDecode(pbytes[2..^1])
           echo "received", pbytes
           let resp = await reqHandler(req)
           if resp.isSome:
-            await transp.sendTo(raddr, @[resp.get().code])
-        else:
+            await transp.sendTo(raddr, @[1.byte, reqId] & @[resp.get().code])
+        else: # response
+          assert(pbytes[0] == 1)
+          let reqId = pbytes[1]
           # response arrived. Search for request and notify
-          echo "response arrived"
+          echo "response arrived ", reqId, " from ", raddr
+          reqs[reqId.int].complete()
       except CatchableError as exc:
         raiseAssert exc.msg
 
@@ -178,14 +196,16 @@ proc init*(reqHandler: auto) : Future[Network] {.async.} =
     ta = initTAddress("0.0.0.0:5000")
     udpTransport = newDatagramTransport(udpHandler, local = ta)
 
-  Network(switch: switch, gossipSub: gossipSub, udpTransport:udpTransport)
+  Network(switch: switch, gossipSub: gossipSub, udpTransport:udpTransport, reqs: reqs)
 
-method connect*(n: Network, peerAddr: NetworkAddress): Future[NetworkPeerId] {.async}=
-  let 
-    peerId = await n.switch.connect(peerAddr, allowUnknownPeerId=true)
-  NetworkPeerId(peerId: peerId)
+proc connect*(n: Network, peerAddr: NetworkAddress): Future[NetworkPeerId] {.async}=
+  echo "connect: ", peerAddr 
+  let
+    ma = MultiAddress.init(peerAddr).tryGet() 
+    peerId = await n.switch.connect(ma, allowUnknownPeerId=true)
+  NetworkPeerId(peerId: peerId, address: peerAddr)
 
-method publish*(n: Network,
+proc publish*(n: Network,
                 topic: string,
                 data: seq[byte],
                 maxCopies: int = int.high,
@@ -193,26 +213,38 @@ method publish*(n: Network,
 
     await n.gossipSub.publish(topic, data, maxCopies, shuffleDests)
 
-method subscribe*(n: Network,
+proc subscribe*(n: Network,
                 topic: string,
-                handler: TopicHandler) {.public, raises: [].} =
+                handler: TopicHandler) =
 
     n.gossipSub.subscribe(topic, handler)
 
-method addValidator*(n: Network,
+proc addValidator*(n: Network,
                      topic: varargs[string],
-                     hook: ValidatorHandler) {.base, public, gcsafe, raises: [].} =
+                     hook: ValidatorHandler) =
 
     n.gossipSub.addValidator(topic, hook)
 
-method getPeerId*(n: Network) : NetworkPeerId {.raises: [].} =
-    NetworkPeerId(peerId: n.gossipSub.switch.peerInfo.peerId)
+proc getPeerId*(n: Network) : NetworkPeerId =
+    try:
+      NetworkPeerId(
+        peerId: n.switch.peerInfo.peerId, 
+        address: n.udpTransport.localAddress)
+    except CatchableError as exc:
+      raiseAssert exc.msg
 
-method getNeighors*(n: Network, topic: string) : auto {.raises: [].} =
+proc `$`*(x: NetworkPeerId) : string =
+  $x.peerId
+
+proc getNeighors*(n: Network, topic: string) : HashSet[PubSubPeer] =
     n.gossipSub.mesh.getOrDefault(topic)
 
-method getPeers*(n: Network): seq[NetworkPeerId] {.raises: [].} =
+proc getPeers*(n: Network): seq[NetworkPeerId] =
   let
+    # peers = switch.connectedPeers(Direction.Out) # we might need a bigger set
     peers = n.switch.peerStore[AddressBook].book
   for p in peers.keys:
     result &= NetworkPeerId(peerId: p)
+
+proc getAddr*(n: Network) : auto =
+  n.switch.peerInfo.addrs

@@ -1,5 +1,4 @@
-import stew/endians2, stew/byteutils, tables, strutils, os
-import vendor/nim-libp2p/libp2p
+import stew/endians2, stew/byteutils, tables, strutils, os, sets
 import chronos
 import random # need since rng leads to "Error: internal error: could not find env param for segmentItRandom"
 import sequtils, hashes, math, metrics
@@ -247,8 +246,8 @@ proc main {.async.} =
     netw.subscribe(dasTopicC(col), messageHandler)
     netw.addValidator([dasTopicC(col)], messageValidator)
 
-  echo "Listening on ", netw.switch.peerInfo.addrs
-  echo myId, ", ", isPublisher, ", ", netw.switch.peerInfo.peerId
+  echo "Listening on ", $netw.getAddr
+  echo myId, ", ", isPublisher, ", ", $netw.getPeerId
 
   var peersInfo = toSeq(1..parseInt(getEnv("PEERS")))
   rng.shuffle(peersInfo)
@@ -335,7 +334,6 @@ proc main {.async.} =
       ## start sampling
 
       let
-        #peers = switch.connectedPeers(Direction.Out) # we might need a bigger set
         peers = netw.getPeers()
       #echo "Peers:", peers
       var
