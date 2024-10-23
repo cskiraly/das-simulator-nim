@@ -15,13 +15,16 @@ type
     switch: Switch
     gossipSub: GossipSub
     udpTransport: DatagramTransport
-    peers: Table[TransportAddress, NetworkPeerId]
+    custody: byte
+    peers: TableRef[TransportAddress, NetworkPeerId]
     reqs: TableRef[int, Future[void]]
   NetworkMessage* = Message
   NetworkAddress* = TransportAddress
   NetworkPeerId* = ref object
     peerId: PeerId
     address: NetworkAddress
+    custody: byte
+
   reqMessage* = ref object
     msgId*: int
     row*: int
@@ -29,6 +32,7 @@ type
     tout*: byte
   respMessage* = ref object
     code*: byte
+
   ReqHandler* = proc (m: reqMessage): Future[Option[respMessage]] {.async.}
 
 proc hash*(x: NetworkPeerId): Hash =
@@ -64,7 +68,8 @@ proc new(T: typedesc[ReqProto], reqHandler: auto): T =
   return reqproto
 
 proc getCustody*(n: Network, peerId: NetworkPeerId) : int =
-  parseInt(n.switch.peerStore[AgentBook][peerId.peerId])
+  #parseInt(n.switch.peerStore[AgentBook][peerId.peerId])
+  peerId.custody.int
 
 proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
@@ -88,6 +93,17 @@ proc reqDecode(req: seq[byte]): reqMessage =
 proc reqEncode(req: reqMessage): seq[byte] =
   @[req.msgId.byte, req.row.byte, (req.row shr 8).byte, req.col.byte, (req.col shr 8).byte, req.tout.byte]
 
+type
+  connMessage* = ref object
+    direction*: byte
+    custody*: byte
+
+proc connEncode(conn: connMessage): seq[byte] =
+  @[conn.direction, conn.custody]
+
+proc connDecode(msg: seq[byte]): connMessage = 
+  connMessage(direction: msg[0], custody: msg[1])
+
 var reqId: int
 proc request*(n: Network, peerId: NetworkPeerId, req: reqMessage): Future[respMessage] {.async.} =
   # send request
@@ -104,7 +120,7 @@ proc request*(n: Network, peerId: NetworkPeerId, req: reqMessage): Future[respMe
   await f
   echo "response arrived to ", myReqId
 
-proc init*(reqHandler: ReqHandler) : Future[Network] {.async.} = 
+proc init*(reqHandler: ReqHandler, custody: byte) : Future[Network] {.async.} = 
   proc handler(stream: Connection, proto: string) {.async.} =
         let
           msg = reqDecode(await stream.readLp(6))
@@ -113,12 +129,14 @@ proc init*(reqHandler: ReqHandler) : Future[Network] {.async.} =
           await stream.writeLp([resp.get().code])
         await stream.close()
 
-  var reqs: TableRef[int, Future[void]] = newTable[int, Future[void]]()
+  var reqs = newTable[int, Future[void]]()
+  var peers = newTable[TransportAddress, NetworkPeerId]()
 
   proc udpHandler(transp: DatagramTransport,
                raddr: TransportAddress): Future[void] {.async: (raises: []).} =
       try:
         let pbytes = transp.getMessage()
+
         if pbytes[0] == 0: # request
           # request arrived
           let reqId = pbytes[1]
@@ -127,17 +145,35 @@ proc init*(reqHandler: ReqHandler) : Future[Network] {.async.} =
           let resp = await reqHandler(req)
           if resp.isSome:
             await transp.sendTo(raddr, @[1.byte, reqId] & @[resp.get().code])
-        else: # response
-          assert(pbytes[0] == 1)
+
+        elif pbytes[0] == 1: # response
           let reqId = pbytes[1]
           # response arrived. Search for request and notify
           echo "response arrived ", reqId, " from ", raddr
           reqs[reqId.int].complete()
+
+        elif pbytes[0] == 2: # connect
+          let msg = connDecode(pbytes[1..^1])
+          echo "connect arrived from ", raddr, " with custody ", msg.custody
+          echo "peers len:", peers.len
+          if peers.hasKey(raddr):
+            # if already known, update custody info
+            peers[raddr].custody = msg.custody
+          else:
+            # first seen
+            peers[raddr] = NetworkPeerId(address: raddr, custody: custody)
+
+          if msg.direction == 0:
+            echo "sending reverse connect"
+            let msg2 = connMessage(direction: 1, custody: custody)
+            await transp.sendTo(raddr, @[2.byte] & connEncode(msg2)) 
+
+        else:
+          echo "ERROR: wrong message type"
+
       except CatchableError as exc:
         echo "exception ", reqId
         raiseAssert exc.msg
-
-  var peers: Table[TransportAddress, NetworkPeerId] = initTable[TransportAddress, NetworkPeerId]()
 
   let
     rng = libp2p.newRng()
@@ -197,15 +233,25 @@ proc init*(reqHandler: ReqHandler) : Future[Network] {.async.} =
     ta = initTAddress("0.0.0.0:5000")
     udpTransport = newDatagramTransport(udpHandler, local = ta)
 
-  Network(switch: switch, gossipSub: gossipSub, udpTransport:udpTransport, reqs: reqs)
+  Network(
+    switch: switch, gossipSub: gossipSub, 
+    udpTransport:udpTransport, 
+    reqs: reqs, 
+    peers: peers,
+    custody: custody)
 
 proc connect*(n: Network, peerAddr: NetworkAddress): Future[NetworkPeerId] {.async}=
   echo "connect: ", peerAddr 
   let
     ma = MultiAddress.init(peerAddr).tryGet() 
     libp2pPeerId = await n.switch.connect(ma, allowUnknownPeerId=true)
-    peerId = NetworkPeerId(peerId: libp2pPeerId, address: peerAddr)
+    peerId = NetworkPeerId(peerId: libp2pPeerId, address: peerAddr, custody: 0)
   n.peers[peerAddr] = peerId
+
+  echo "sending connect to ", peerAddr
+  let msg = connMessage(direction: 0, custody: n.custody)
+  discard n.udpTransport.sendTo(peerAddr, @[2.byte] & connEncode(msg)) 
+
   peerId  
 
 proc publish*(n: Network,
@@ -232,7 +278,8 @@ proc getPeerId*(n: Network) : NetworkPeerId =
     try:
       NetworkPeerId(
         peerId: n.switch.peerInfo.peerId, 
-        address: n.udpTransport.localAddress)
+        address: n.udpTransport.localAddress,
+        custody: n.custody)
     except CatchableError as exc:
       raiseAssert exc.msg
 

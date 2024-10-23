@@ -84,7 +84,7 @@ proc main {.async.} =
         some(respMessage(code: 1.byte)) # TODO: send segment
 
   # initialize network stack
-  let netw = await network.init(reqHandler)
+  let netw = await network.init(reqHandler, custodyRows.byte)
 
   proc peerToRows(peerId: NetworkPeerId) : seq[int] =
     let peerCustody =
