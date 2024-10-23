@@ -30,7 +30,7 @@ done
 
 
 rm -f shadowlog* latencies* stats* main && rm -rf shadow.data/
-nim c -d:chronicles_colors=None --threads:on -d:metrics -d:libp2p_network_protocols_metrics -d:release --NimblePath: "../nimbledeps/pkgs" main 
+nim c -d:chronicles_colors=None -d:chronicles_log_level=INFO -d:chronicles_sinks="textlines[stdout,nocolors]" --threads:on -d:metrics -d:libp2p_network_protocols_metrics -d:release main 
 
 for i in $(seq $runs); do
     echo "Running for turn "$i
