@@ -1,11 +1,12 @@
 import stew/endians2, stew/byteutils, tables, strutils, os
-import vendor/nim-libp2p/libp2p, vendor/nim-libp2p/libp2p/protocols/pubsub/rpc/messages
-import vendor/nim-libp2p/libp2p/muxers/mplex/lpchannel, vendor/nim-libp2p/libp2p/protocols/ping
+import libp2p, libp2p/protocols/pubsub/rpc/messages as libp2pMessages
+import libp2p/muxers/mplex/lpchannel, libp2p/protocols/ping
 import chronos
 import random # need since rng leads to "Error: internal error: could not find env param for segmentItRandom"
 import sequtils, hashes
 from times import getTime, toUnix, fromUnix, `-`, initTime, `$`, inMilliseconds, Duration
 from nativesockets import getHostname
+import codexdht
 
 export ValidationResult
 export shuffle
@@ -17,7 +18,7 @@ type
     udpTransport: DatagramTransport
     peers: Table[TransportAddress, NetworkPeerId]
     reqs: TableRef[int, Future[void]]
-  NetworkMessage* = Message
+  NetworkMessage* = libp2pMessages.Message
   NetworkAddress* = TransportAddress
   NetworkPeerId* = ref object
     peerId: PeerId
@@ -66,7 +67,7 @@ proc new(T: typedesc[ReqProto], reqHandler: auto): T =
 proc getCustody*(n: Network, peerId: NetworkPeerId) : int =
   parseInt(n.switch.peerStore[AgentBook][peerId.peerId])
 
-proc msgIdProvider(m: Message): Result[MessageId, ValidationResult] =
+proc msgIdProvider(m: NetworkMessage): Result[MessageId, ValidationResult] =
   return ok(($m.data.hash).toBytes())
 
 proc resolveAddress*(tAddress: string) : TransportAddress =

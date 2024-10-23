@@ -1,3 +1,6 @@
 [submodule "shadow/vendor/nim-libp2p"]
 	path = shadow/vendor/nim-libp2p
 	url = https://github.com/cskiraly/nim-libp2p
+[submodule "shadow/vendor/nim-codex-dht"]
+	path = shadow/vendor/nim-codex-dht
+	url = https://github.com/codex-storage/nim-codex-dht
