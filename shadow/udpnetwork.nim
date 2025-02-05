@@ -10,6 +10,11 @@ from nativesockets import getHostname
 export ValidationResult
 export shuffle
 
+export libp2p_gossipsub_duplicate_during_validation
+export libp2p_gossipsub_duplicate
+export libp2p_gossipsub_received
+export libp2p_gossipsub_idontwant_saved_messages
+
 type
   Network = ref object
     switch: Switch

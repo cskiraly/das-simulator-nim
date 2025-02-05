@@ -1,0 +1,7 @@
+shadow.data*/
+*.diff
+*.log
+main
+shadow.yaml
+shadowlog1
+myenv/

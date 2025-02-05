@@ -21,28 +21,30 @@ proc main {.async.} =
     custodyRows = parseInt(getEnv("CUSTODY"))   # rows to custody (=topics to sbscribe)
     custodyCols = parseInt(getEnv("CUSTODY"))
   const
-    blocksize = 2^21  # size of DAS block, before EC, in bytes
-    numRows = 128      # number of Rows after EC
-    numRowsK = 64     # number of Rows before EC
-    numCols = 128
-    numColsK = 64
-    sendRows = true   # whether the publisher send out on row topics
+    blocksize = 2^10  # size of DAS block, before EC, in bytes
+    numRows = 1      # number of Rows after EC
+    numRowsK = 1     # number of Rows before EC
+    numCols = 1
+    numColsK = 1
+    sendRows = false   # whether the publisher send out on row topics
     sendCols = true
-    crossForward = true   # whether to relay received segments in the other dimension (row->col, col->row)
-    publisherMaxCopies = 1  # how many copies of each segment to send out (see shufflepeers as well)
+    crossForward = false   # whether to relay received segments in the other dimension (row->col, col->row)
+    publisherMaxCopies = 8  # how many copies of each segment to send out (see shufflepeers as well)
     publisherShufflePeers = true # how to select peers to send to. false: always the same; true: randomize
     publisherSendInRandomOrder = true  # whether to radomize segment order when publishing
     publisherSendRowCount = numRows # numRows: send whole row; numRowsK: send only half row
     publisherSendColCount = numCols
-    repairOnTheFly = true # whether to repar as soon as a whole K arrived (both row and column)
+    repairOnTheFly = false # whether to repar as soon as a whole K arrived (both row and column)
     repairForward = false # whether to forward repaired chunks on the same line
     repairCrossForward = true # wheher to forward repaired segments on the other dimension
 
-    sampleCount = 71
+    sampleCount = 0
 
-    msgCount = 3
+    msgCount = 1
 
-    printGossipSubStats = false
+    validationDelay = 0.milliseconds
+
+    printGossipSubStats = true
   let
     interest = numRows * custodyCols + (numCols-custodyCols) * custodyRows
   let
@@ -157,20 +159,20 @@ proc main {.async.} =
     if crossForward:
       if roc:
         if int(col) in cols:
-          #echo "crossing to col: ", col
+          echo "crossing to col: ", col
           sendOnCol(col, data)
       else:
         if int(row) in rows:
-          #echo "crossing to row: ", row
+          echo "crossing to row: ", row
           sendOnRow(row, data)
 
     messagesChunks[msgId].inc((row,col))
     if messagesChunks[msgId][(row,col)] > 1:
-      #echo sentUint, " DUP ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col
+      echo sentUint, " DUP ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col
       return
     else:
       messagesChunkCount.inc(msgId)
-      #echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col, " ", messagesChunkCount[msgId], "/", interest
+      echo sentUint, " ARR ms: ", messageLatency(data).inMilliseconds(), " r", row, "c", col, " ", messagesChunkCount[msgId], "/", interest
 
     # answer request if needed
     if rx.haskey((msgId, row, col)):
@@ -236,6 +238,7 @@ proc main {.async.} =
     if isAttacker and Moment.now - startOfTest >= attackAfter:
       return ValidationResult.Ignore
 
+    # await sleepAsync(validationDelay) 
     return ValidationResult.Accept
 
   for row in rows:
@@ -398,9 +401,9 @@ proc main {.async.} =
     #requires exporting counters from GossipSub.nim
     echo "statcounters: dup_during_validation ", libp2p_gossipsub_duplicate_during_validation.value(),
         "\tidontwant_saves ", libp2p_gossipsub_idontwant_saved_messages.value(),
-        #"gossip optimization saves ", libp2p_gossipsub_saved_bytes.value(),
+        # #"gossip optimization saves ", libp2p_gossipsub_saved_bytes.value(),
         "\tdup_received ", libp2p_gossipsub_duplicate.value(),
-        "\tUnique_msg_received ", libp2p_gossipsub_received.value(),
-        "\tStaggered_Saves ", libp2p_gossipsub_staggerSave.value(),
-        "\tDontWant_IN_Stagger ", libp2p_gossipsub_staggerDontWantSave.value()
+        "\tUnique_msg_received ", libp2p_gossipsub_received.value()
+        # "\tStaggered_Saves ", libp2p_gossipsub_staggerSave.value(),
+        # "\tDontWant_IN_Stagger ", libp2p_gossipsub_staggerDontWantSave.value()
 waitFor(main())
