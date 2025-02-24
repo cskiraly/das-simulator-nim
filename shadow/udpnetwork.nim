@@ -267,6 +267,13 @@ proc publish*(n: Network,
 
     await n.gossipSub.publish(topic, data, maxCopies, shuffleDests)
 
+proc batchPublish*(n: Network,
+                pieces: seq[tuple[topic: string, data: seq[byte]]],
+                maxCopies: int = int.high,
+                shuffleDests = false): Future[int] {.async.} =
+
+    await n.gossipSub.batchPublish(pieces, maxCopies, shuffleDests)
+
 proc subscribe*(n: Network,
                 topic: string,
                 handler: TopicHandler) =
