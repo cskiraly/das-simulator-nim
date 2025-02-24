@@ -64,3 +64,6 @@ done
 grep  "\"RX\"" shadow.data/hosts/peer*/main.1000.stdout >rx.csv
 python "$BASEDIR/plot_rx.py"
 python "$BASEDIR/plot_arr.py"
+
+stats=$(grep -E "^0 " summmary.txt | awk '{ lat_total += $2;rcv_total +=$3; count++ } END { print lat_total/count","rcv_total/count }')
+echo $stats
