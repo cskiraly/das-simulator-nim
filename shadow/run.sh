@@ -63,3 +63,4 @@ done
 
 grep  "\"RX\"" shadow.data/hosts/peer*/main.1000.stdout >rx.csv
 python "$BASEDIR/plot_rx.py"
+python "$BASEDIR/plot_arr.py"
