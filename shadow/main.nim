@@ -37,7 +37,6 @@ proc main {.async.} =
     repairOnTheFly = false # whether to repar as soon as a whole K arrived (both row and column)
     repairForward = false # whether to forward repaired chunks on the same line
     repairCrossForward = true # wheher to forward repaired segments on the other dimension
-    batchPublish = false # whether to use batchPublish to optimize publication schedule
 
     sampleCount = 0
 
@@ -308,7 +307,6 @@ proc main {.async.} =
         for rc in segments:
           yield rc
 
-      var pieces = newSeq[tuple[topic: string, data: seq[byte]]]()
       for (row, col) in segmentIt():
           nowBytes[10] = byte(msg)
           nowBytes[12] = byte(row)
@@ -318,18 +316,10 @@ proc main {.async.} =
           echo "sending ", uint64(nowInt.nanoseconds), " r", row, "c", col
           if sendRows:
             nowBytes[16] = 0
-            if batchPublish:
-              pieces.add((dasTopicR(row), nowBytes))
-            else:
-              discard netw.publish(dasTopicR(row), nowBytes, publisherMaxCopies, publisherShufflePeers)
+            discard netw.publish(dasTopicR(row), nowBytes, publisherMaxCopies, publisherShufflePeers)
           if sendCols:
             nowBytes[16] = 1
-            if batchPublish:
-              pieces.add((dasTopicC(col), nowBytes))
-            else:
-              discard netw.publish(dasTopicC(col), nowBytes, publisherMaxCopies, publisherShufflePeers)
-      if batchPublish:
-        discard netw.batchPublish(pieces, publisherMaxCopies, publisherShufflePeers)
+            discard netw.publish(dasTopicC(col), nowBytes, publisherMaxCopies, publisherShufflePeers)
     else:
       ## start sampling
 
