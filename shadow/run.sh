@@ -1,11 +1,11 @@
 #!/bin/sh
 
 if [ $# -lt 3 ]; then
-    echo "Usage: $0 <runs> <FastNodes> <SlowNodes> [PacketLoss(float0..1)]"
+    echo "Usage: $0 <runs> <FastNodes> <SlowNodes> [PacketLoss(float0..1)] [BASEDIR]"
     exit 1
 fi
 
-BASEDIR=`pwd`
+BASEDIR=${5:-`pwd`}
 WORKDIR="results/`date -Iseconds`"
 echo $WORKDIR
 mkdir -p "$WORKDIR"
@@ -18,7 +18,7 @@ nodes1="$2"			#number of nodes in class 1
 nodes2="$3"			#number of nodes in class 2
 packet_loss=${4:-0.0}
 nodes=$(($nodes1 + $nodes2))
-shadow_file_base="shadow.yaml.template"
+shadow_file_base="$BASEDIR/shadow.yaml.template"
 shadow_file="$WORKDIR/shadow.yaml"	
 sed '/*FastHost/q' "$shadow_file_base" >"$shadow_file"
 sed -E -i "s/\"PEERS\": \"[0-9]+\"/\"PEERS\": \"$nodes\"/" "$shadow_file"
@@ -38,9 +38,11 @@ done
 
 
 rm -f shadowlog* latencies* stats* main && rm -rf shadow.data/
+cd $BASEDIR
 nim c -d:chronicles_colors=None -d:chronicles_log_level=INFO -d:chronicles_sinks="textlines[stdout,nocolors]" --threads:on -d:metrics -d:libp2p_network_protocols_metrics -d:release main 
+cd -
 
-cp main "$WORKDIR" 
+cp $BASEDIR/main "$WORKDIR" 
 cd "$WORKDIR"
 
 for i in $(seq $runs); do
