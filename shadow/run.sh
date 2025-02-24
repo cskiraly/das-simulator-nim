@@ -27,12 +27,14 @@ sed -E -i "s/packet_loss [0-9\.]+/packet_loss $packet_loss/" "$shadow_file"
 counter=2
 while [ $counter -le $nodes1 ]; do
   echo "  peer$counter:
-      <<: *FastHost" >> "$shadow_file"
+      <<: *FastHost
+      network_node_id: $counter" >> "$shadow_file"
   counter=$((counter + 1))
 done
 while [ $counter -le $nodes ]; do
   echo "  peer$counter:
-      <<: *SlowHost" >> "$shadow_file"
+      <<: *SlowHost
+      network_node_id: $counter" >> "$shadow_file"
   counter=$((counter + 1))
 done
 
@@ -43,6 +45,7 @@ nim c -d:chronicles_colors=None -d:chronicles_log_level=INFO -d:chronicles_sinks
 cd -
 
 cp $BASEDIR/main "$WORKDIR" 
+ln -s $BASEDIR/networkmodel/atlas_v201801.shadow_v2.gml "$WORKDIR"
 cd "$WORKDIR"
 
 for i in $(seq $runs); do
