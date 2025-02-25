@@ -6,7 +6,7 @@ if [ $# -lt 3 ]; then
 fi
 
 BASEDIR=${5:-`pwd`}
-WORKDIR="results/`date -Iseconds`"
+WORKDIR="results/"${6:-`date -Iseconds`}
 echo $WORKDIR
 mkdir -p "$WORKDIR"
 git diff --submodule=diff > $WORKDIR/git.diff
@@ -51,7 +51,8 @@ cd "$WORKDIR"
 for i in $(seq $runs); do
     echo "Running for turn "$i
     shadow shadow.yaml > shadowlog$i && 
-        grep -rne 'milliseconds\|BW' shadow.data/ > latencies$i && 
+        #grep -rne 'milliseconds\|BW' shadow.data/ > latencies$i && 
+        grep -rne 'milliseconds' shadow.data/ > latencies$i && 
         grep -rne 'statcounters:' shadow.data/ > stats$i
     #rm -rf shadow.data/
 done
@@ -68,5 +69,11 @@ grep  "\"RX\"" shadow.data/hosts/peer*/main.1000.stdout >rx.csv
 python "$BASEDIR/plot_rx.py"
 python "$BASEDIR/plot_arr.py"
 
-stats=$(grep -E "^0 " summmary.txt | awk '{ lat_total += $2;rcv_total +=$3; count++ } END { print lat_total/count","rcv_total/count }')
+#rm -f shadowlog* && rm -rf shadow.data/
+
+stats=$(awk '
+   /^0 / { lat_total += $2;rcv_total +=$3; count++ }
+   /^dup_received/ { dup_total += $9; dup_count++ }
+   /^dupv_received/ { dupv_total += $9; dupv_count++ }
+   END { print lat_total/count","rcv_total/count","dup_total/count","dupv_total/count }' summmary.txt )
 echo $stats

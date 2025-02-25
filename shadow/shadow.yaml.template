@@ -10,16 +10,16 @@ experimental:
 x-constants:
   - &FastHost
     network_node_id: 0
-    bandwidth_up: "1000 Mbit"
-    bandwidth_down: "1000 Mbit"
+    bandwidth_up: "20 Mbit"
+    bandwidth_down: "20 Mbit"
     processes:
     - path: ./main
       start_time: 5s
       environment: {"PEERS": "1000", "CONNECTTO": "100", "CUSTODY": "1"}
   - &SlowHost
     network_node_id: 0
-    bandwidth_up: "50 Mbit"
-    bandwidth_down: "50 Mbit"
+    bandwidth_up: "20 Mbit"
+    bandwidth_down: "20 Mbit"
     processes:
     - path: ./main
       start_time: 5s

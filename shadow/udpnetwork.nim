@@ -214,11 +214,11 @@ proc init*(reqHandler: ReqHandler, custody: byte) : Future[Network] {.async.} =
   gossipSub.parameters.pruneBackoff = 3.seconds
   gossipSub.parameters.gossipFactor = 0.05
   gossipSub.parameters.d = 8
-  gossipSub.parameters.dLow = 6
-  gossipSub.parameters.dHigh = 12
-  gossipSub.parameters.dScore = 6
-  gossipSub.parameters.dOut = 6 div 2
-  gossipSub.parameters.dLazy = 6
+  gossipSub.parameters.dLow = gossipSub.parameters.d - 2
+  gossipSub.parameters.dHigh = gossipSub.parameters.d + 4
+  gossipSub.parameters.dScore = gossipSub.parameters.d - 2
+  gossipSub.parameters.dOut = (gossipSub.parameters.d - 2) div 2
+  gossipSub.parameters.dLazy = gossipSub.parameters.d - 2
   gossipSub.topicParams["test"] = TopicParams(
     topicWeight: 1,
     firstMessageDeliveriesWeight: 1,

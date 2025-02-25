@@ -21,7 +21,7 @@ proc main {.async.} =
     custodyRows = parseInt(getEnv("CUSTODY"))   # rows to custody (=topics to sbscribe)
     custodyCols = parseInt(getEnv("CUSTODY"))
   const
-    blocksize = 2^10  # size of DAS block, before EC, in bytes
+    blocksize = 102400  # size of DAS block, before EC, in bytes
     numRows = 1      # number of Rows after EC
     numRowsK = 1     # number of Rows before EC
     numCols = 1
@@ -42,7 +42,7 @@ proc main {.async.} =
 
     msgCount = 1
 
-    validationDelay = 0.milliseconds
+    validationDelay = 30.milliseconds
 
     printGossipSubStats = true
   let
@@ -238,7 +238,7 @@ proc main {.async.} =
     if isAttacker and Moment.now - startOfTest >= attackAfter:
       return ValidationResult.Ignore
 
-    # await sleepAsync(validationDelay) 
+    await sleepAsync(validationDelay) 
     return ValidationResult.Accept
 
   for row in rows:
